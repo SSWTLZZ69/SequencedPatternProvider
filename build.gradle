@@ -68,6 +68,11 @@ dependencies {
     runtimeOnly fg.deobf("local:Jade-1.20.1-Forge:11.13.2")
     compileOnly fg.deobf("local:jei-1.20.1-forge:15.20.0.132")
     runtimeOnly fg.deobf("local:jei-1.20.1-forge:15.20.0.132")
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+}
+
+tasks.named('test', Test).configure {
+    useJUnitPlatform()
 }
 
 tasks.named('processResources', ProcessResources).configure {

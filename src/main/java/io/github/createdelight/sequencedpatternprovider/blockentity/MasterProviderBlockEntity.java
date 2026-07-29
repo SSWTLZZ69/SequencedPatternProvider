@@ -22,6 +22,7 @@ import io.github.createdelight.sequencedpatternprovider.pattern.AssemblyStepDesc
 import io.github.createdelight.sequencedpatternprovider.pattern.SequencePatternDetails;
 import io.github.createdelight.sequencedpatternprovider.probability.ProbabilityPlan;
 import io.github.createdelight.sequencedpatternprovider.tracking.AttemptToken;
+import io.github.createdelight.sequencedpatternprovider.tracking.TokenlessReturnSelector;
 import it.unimi.dsi.fastutil.objects.Object2LongMap;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -513,17 +514,23 @@ public final class MasterProviderBlockEntity extends AENetworkBlockEntity implem
             matchedJob = findJobByAttempt(attempt.attemptId());
             if (matchedJob == null || !matchesReturnedWorkpiece(stack, matchedJob)) return 0;
         } else {
-            List<ActiveJob> candidates = findTokenlessReturnCandidates(stack);
-            if (candidates.size() != 1) {
-                if (candidates.size() > 1 && loggedAmbiguousTokenlessReturns.add(itemKey)) {
+            List<TokenlessReturnSelector.Candidate<ActiveJob>> candidates = findTokenlessReturnCandidates(stack);
+            matchedJob = TokenlessReturnSelector.select(candidates);
+            if (matchedJob == null) {
+                if (!candidates.isEmpty() && loggedAmbiguousTokenlessReturns.add(itemKey)) {
                     LOGGER.warn("SPP refused ambiguous tokenless intermediate at {}: item={}, candidates={}; "
-                                    + "waiting for an exact attempt token instead of assigning the item to the wrong job",
-                            worldPosition, itemKey, candidates.size());
+                                    + "tag={}; candidates differ by recipe or dispatched step",
+                            worldPosition, itemKey, candidates.size(), stack.getTag());
                 }
                 return 0;
             }
             loggedAmbiguousTokenlessReturns.remove(itemKey);
-            matchedJob = candidates.get(0);
+            if (candidates.size() > 1) {
+                LOGGER.debug("SPP assigned fungible tokenless intermediate at {}: item={}, recipe={}, "
+                                + "dispatchedStep={}, candidates={}, selectedAttempt={}",
+                        worldPosition, itemKey, matchedJob.recipeId, matchedJob.step,
+                        candidates.size(), matchedJob.attemptId);
+            }
             tokenlessFallback = true;
         }
 
@@ -574,23 +581,37 @@ public final class MasterProviderBlockEntity extends AENetworkBlockEntity implem
         return null;
     }
 
-    private List<ActiveJob> findTokenlessReturnCandidates(ItemStack stack) {
-        List<ActiveJob> candidates = new ArrayList<>();
+    private List<TokenlessReturnSelector.Candidate<ActiveJob>> findTokenlessReturnCandidates(ItemStack stack) {
+        List<TokenlessReturnSelector.Candidate<ActiveJob>> candidates = new ArrayList<>();
         for (ActiveJob job : jobs) {
-            if (matchesReturnedWorkpiece(stack, job)) candidates.add(job);
+            TokenlessReturnSelector.MatchKind kind = classifyReturnedWorkpiece(stack, job);
+            if (kind != null) {
+                candidates.add(new TokenlessReturnSelector.Candidate<>(job, job.recipeId, job.step, kind));
+            }
         }
         return candidates;
     }
 
     private boolean matchesReturnedWorkpiece(ItemStack stack, ActiveJob job) {
-        if (!job.dispatched) return false;
+        return classifyReturnedWorkpiece(stack, job) != null;
+    }
+
+    private @Nullable TokenlessReturnSelector.MatchKind classifyReturnedWorkpiece(ItemStack stack, ActiveJob job) {
+        if (!job.dispatched) return null;
         SequencePatternDetails details = findPatternDetails(job.recipeId);
-        if (details == null) return false;
+        if (details == null) return null;
         int returnedStep = getAssemblyStep(stack, job.recipeId,
                 details.recipe().getTransitionalItem().getItem());
-        if (job.step < details.totalSteps() - 1 && returnedStep == job.step + 1) return true;
-        if (job.step > 0 && returnedStep == job.step) return true;
-        return job.step == 0 && matchesInitialWorkpiece(stack, job, details);
+        if (job.step < details.totalSteps() - 1 && returnedStep == job.step + 1) {
+            return TokenlessReturnSelector.MatchKind.ADVANCED;
+        }
+        if (job.step > 0 && returnedStep == job.step) {
+            return TokenlessReturnSelector.MatchKind.UNPROCESSED;
+        }
+        if (job.step == 0 && matchesInitialWorkpiece(stack, job, details)) {
+            return TokenlessReturnSelector.MatchKind.UNPROCESSED;
+        }
+        return null;
     }
 
     private int getAssemblyStep(ItemStack stack, ResourceLocation recipeId, Item transitionalItem) {

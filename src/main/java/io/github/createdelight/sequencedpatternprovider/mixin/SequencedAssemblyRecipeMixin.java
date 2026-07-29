@@ -16,9 +16,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import java.util.List;
 
-// Run before compatibility mixins that also replace advance()'s return value.
-// They generally copy the current result, so applying our token first lets them
-// preserve it together with their own NBT instead of cancelling this injector.
+// Use a higher priority than compatibility mixins that also replace advance()'s
+// return value. At RETURN this makes our callback observe their final stack and
+// mirror the attempt address into both the root and SequencedAssembly compounds.
 @Mixin(value = SequencedAssemblyRecipe.class, priority = 1100, remap = false)
 public abstract class SequencedAssemblyRecipeMixin implements AttemptTrackingBridge {
     @Shadow

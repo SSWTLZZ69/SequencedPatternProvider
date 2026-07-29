@@ -99,8 +99,15 @@ public final class ChildProviderBlockEntity extends AENetworkBlockEntity {
     }
 
     public void setCustomName(Component customName) {
-        this.customName = customName;
+        setName(customName.getString());
+    }
+
+    @Override
+    public void setName(String name) {
+        super.setName(name);
+        this.customName = name == null || name.isBlank() ? null : Component.literal(name);
         saveChanges();
+        markForUpdate();
     }
 
     public Component statusMessage() {
@@ -514,8 +521,12 @@ public final class ChildProviderBlockEntity extends AENetworkBlockEntity {
             lockCraftingMode = LockCraftingMode.NONE;
         }
         resetCraftingLock();
-        customName = tag.contains("CustomName", Tag.TAG_STRING)
-                ? Component.Serializer.fromJson(tag.getString("CustomName")) : null;
+        if (tag.contains("CustomName", Tag.TAG_STRING)) {
+            Component importedName = Component.Serializer.fromJson(tag.getString("CustomName"));
+            setName(importedName == null ? "" : importedName.getString());
+        } else {
+            setName("");
+        }
 
         PushDirection pushDirection;
         try {
@@ -605,7 +616,12 @@ public final class ChildProviderBlockEntity extends AENetworkBlockEntity {
                 ? Direction.byName(tag.getString("ActiveOutputSide")) : null;
         nextOutputSideIndex = Math.floorMod(tag.getInt("NextOutputSideIndex"), Direction.values().length);
         redstoneStateInitialized = false;
-        if (tag.contains("CustomName")) customName = Component.Serializer.fromJson(tag.getString("CustomName"));
+        if (tag.contains("CustomName", Tag.TAG_STRING)) {
+            customName = Component.Serializer.fromJson(tag.getString("CustomName"));
+        } else {
+            Component inheritedName = super.getCustomName();
+            customName = inheritedName == null || inheritedName.getString().isBlank() ? null : inheritedName;
+        }
     }
 
     private static int countItems(ItemStackHandler handler) {
