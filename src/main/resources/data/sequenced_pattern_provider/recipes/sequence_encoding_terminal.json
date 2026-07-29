@@ -1,0 +1,15 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "PEP",
+    "CTC",
+    "PEP"
+  ],
+  "key": {
+    "P": {"item": "ae2:engineering_processor"},
+    "E": {"item": "ae2:blank_pattern"},
+    "C": {"item": "ae2:fluix_glass_cable"},
+    "T": {"item": "ae2:pattern_encoding_terminal"}
+  },
+  "result": {"item": "sequenced_pattern_provider:sequence_encoding_terminal"}
+}

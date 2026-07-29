@@ -1,0 +1,35 @@
+{
+  "type": "create:sequenced_assembly",
+  "ingredient": {
+    "item": "minecraft:jigsaw"
+  },
+  "loops": 2,
+  "results": [
+    {
+      "chance": 18.2634,
+      "item": "minecraft:emerald"
+    },
+    {
+      "chance": 81.7366,
+      "item": "minecraft:coal"
+    }
+  ],
+  "sequence": [
+    {
+      "type": "create:pressing",
+      "ingredients": [
+        {
+          "item": "create:incomplete_precision_mechanism"
+        }
+      ],
+      "results": [
+        {
+          "item": "create:incomplete_precision_mechanism"
+        }
+      ]
+    }
+  ],
+  "transitionalItem": {
+    "item": "create:incomplete_precision_mechanism"
+  }
+}

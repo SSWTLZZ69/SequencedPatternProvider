@@ -1,0 +1,8 @@
+{
+  "type": "minecraft:block",
+  "pools": [{
+    "rolls": 1,
+    "entries": [{ "type": "minecraft:item", "name": "sequenced_pattern_provider:master_pattern_provider" }],
+    "conditions": [{ "condition": "minecraft:survives_explosion" }]
+  }]
+}

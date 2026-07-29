@@ -1,0 +1,6 @@
+{
+  "parent": "minecraft:block/cube_all",
+  "textures": {
+    "all": "sequenced_pattern_provider:block/master_pattern_provider"
+  }
+}

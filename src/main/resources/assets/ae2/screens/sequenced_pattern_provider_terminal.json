@@ -1,0 +1,30 @@
+{
+  "includes": ["terminals/terminal.json"],
+  "slots": {
+    "SPP_MATERIALS_FIRST": {"left": 38, "bottom": 169, "grid": "HORIZONTAL"},
+    "SPP_ROUTES_FIRST": {"left": 38, "bottom": 152, "grid": "HORIZONTAL"},
+    "SPP_MATERIALS_SECOND": {"left": 38, "bottom": 132, "grid": "HORIZONTAL"},
+    "SPP_ROUTES_SECOND": {"left": 38, "bottom": 115, "grid": "HORIZONTAL"},
+    "SPP_INITIAL_INPUT": {"left": 10, "bottom": 169},
+    "SPP_FINAL_OUTPUT": {"left": 10, "bottom": 133},
+    "BLANK_PATTERN": {"left": 147, "bottom": 161},
+    "ENCODED_PATTERN": {"left": 147, "bottom": 118}
+  },
+  "text": {
+    "dialog_title": {
+      "text": {"translate": "gui.sequenced_pattern_provider.sequence_encoder"},
+      "position": {"left": 8, "top": 6}
+    },
+    "sequence_panel_title": {
+      "text": {"translate": "gui.sequenced_pattern_provider.sequence_steps"},
+      "position": {"left": 8, "bottom": 178}
+    }
+  },
+  "terminalStyle": {
+    "bottom": {"texture": "guis/pattern.png", "srcRect": [0, 71, 195, 178]},
+    "supportsAutoCrafting": true
+  },
+  "widgets": {
+    "encodePattern": {"left": 147, "bottom": 142}
+  }
+}

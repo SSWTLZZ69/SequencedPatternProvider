@@ -1,0 +1,35 @@
+{
+  "type": "create:sequenced_assembly",
+  "ingredient": {
+    "item": "minecraft:barrier"
+  },
+  "loops": 1,
+  "results": [
+    {
+      "chance": 1.0,
+      "item": "minecraft:nether_star"
+    },
+    {
+      "chance": 1.0,
+      "item": "minecraft:air"
+    }
+  ],
+  "sequence": [
+    {
+      "type": "create:pressing",
+      "ingredients": [
+        {
+          "item": "create:incomplete_precision_mechanism"
+        }
+      ],
+      "results": [
+        {
+          "item": "create:incomplete_precision_mechanism"
+        }
+      ]
+    }
+  ],
+  "transitionalItem": {
+    "item": "create:incomplete_precision_mechanism"
+  }
+}

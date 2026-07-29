@@ -1,0 +1,24 @@
+{
+  "includes": ["common/common.json", "common/player_inventory.json"],
+  "generatedBackground": {
+    "width": 176,
+    "height": 213
+  },
+  "slots": {
+    "ENCODED_PATTERN": {"left": 8, "top": 45, "grid": "HORIZONTAL"}
+  },
+  "text": {
+    "dialog_title": {
+      "text": {"translate": "block.sequenced_pattern_provider.master_pattern_provider"},
+      "position": {"left": 8, "top": 6}
+    },
+    "pattern_title": {
+      "text": {"translate": "gui.sequenced_pattern_provider.master.patterns"},
+      "position": {"left": 8, "top": 34}
+    }
+  },
+  "widgets": {
+    "clearChildren": {"left": 8, "top": 96, "width": 80, "height": 18},
+    "abortJob": {"left": 96, "top": 96, "width": 72, "height": 18}
+  }
+}

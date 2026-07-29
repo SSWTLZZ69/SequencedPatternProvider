@@ -1,0 +1,12 @@
+{
+  "parent": "minecraft:block/cube",
+  "textures": {
+    "particle": "sequenced_pattern_provider:block/child_pattern_provider",
+    "down": "sequenced_pattern_provider:block/child_pattern_provider_alternate",
+    "up": "sequenced_pattern_provider:block/child_pattern_provider_alternate_front",
+    "north": "sequenced_pattern_provider:block/child_pattern_provider_alternate_arrow",
+    "south": "sequenced_pattern_provider:block/child_pattern_provider_alternate_arrow",
+    "east": "sequenced_pattern_provider:block/child_pattern_provider_alternate_arrow",
+    "west": "sequenced_pattern_provider:block/child_pattern_provider_alternate_arrow"
+  }
+}

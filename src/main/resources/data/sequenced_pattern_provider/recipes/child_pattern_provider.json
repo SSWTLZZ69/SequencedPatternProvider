@@ -1,0 +1,11 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [" A ", "CPC", " B "],
+  "key": {
+    "A": { "item": "create:andesite_alloy" },
+    "B": { "item": "create:andesite_casing" },
+    "C": { "item": "ae2:fluix_glass_cable" },
+    "P": { "item": "ae2:pattern_provider" }
+  },
+  "result": { "item": "sequenced_pattern_provider:child_pattern_provider" }
+}

@@ -1,0 +1,8 @@
+{
+  "parent": "ae2:part/pattern_encoding_terminal_on",
+  "textures": {
+    "lightsBright": "sequenced_pattern_provider:part/sequence_encoding_terminal_bright",
+    "lightsMedium": "sequenced_pattern_provider:part/sequence_encoding_terminal_medium",
+    "lightsDark": "sequenced_pattern_provider:part/sequence_encoding_terminal_dark"
+  }
+}

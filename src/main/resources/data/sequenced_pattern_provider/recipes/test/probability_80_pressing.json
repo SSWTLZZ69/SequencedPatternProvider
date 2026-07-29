@@ -1,0 +1,35 @@
+{
+  "type": "create:sequenced_assembly",
+  "ingredient": {
+    "item": "minecraft:structure_void"
+  },
+  "loops": 3,
+  "results": [
+    {
+      "chance": 80.0,
+      "item": "minecraft:diamond"
+    },
+    {
+      "chance": 20.0,
+      "item": "minecraft:flint"
+    }
+  ],
+  "sequence": [
+    {
+      "type": "create:pressing",
+      "ingredients": [
+        {
+          "item": "create:incomplete_precision_mechanism"
+        }
+      ],
+      "results": [
+        {
+          "item": "create:incomplete_precision_mechanism"
+        }
+      ]
+    }
+  ],
+  "transitionalItem": {
+    "item": "create:incomplete_precision_mechanism"
+  }
+}

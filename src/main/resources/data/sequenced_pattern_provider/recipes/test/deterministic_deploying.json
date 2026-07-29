@@ -1,0 +1,33 @@
+{
+  "type": "create:sequenced_assembly",
+  "ingredient": {
+    "item": "minecraft:debug_stick"
+  },
+  "loops": 2,
+  "results": [
+    {
+      "item": "minecraft:apple"
+    }
+  ],
+  "sequence": [
+    {
+      "type": "create:deploying",
+      "ingredients": [
+        {
+          "item": "create:incomplete_precision_mechanism"
+        },
+        {
+          "item": "minecraft:iron_nugget"
+        }
+      ],
+      "results": [
+        {
+          "item": "create:incomplete_precision_mechanism"
+        }
+      ]
+    }
+  ],
+  "transitionalItem": {
+    "item": "create:incomplete_precision_mechanism"
+  }
+}
