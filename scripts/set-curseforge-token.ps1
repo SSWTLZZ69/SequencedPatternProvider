@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     交互式设置 CURSEFORGE_TOKEN 用户环境变量，并调用 CurseForge API 验证。
 .DESCRIPTION
@@ -44,6 +44,6 @@ try {
 } catch {
     $code = $_.Exception.Response.StatusCode.value__
     Write-Host "验证失败 (HTTP $code)：$($_.Exception.Message)" -ForegroundColor Red
-    Write-Host "请确认 key 从 console.curseforge.com 复制完整（通常为 `$2a`$10`$... 开头的长串）。"
+    Write-Host '请确认 key 从 console.curseforge.com 复制完整（通常为 $2a$10$... 开头的长串）。'
     exit 2
 }
