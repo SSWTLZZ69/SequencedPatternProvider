@@ -42,16 +42,18 @@ Sequenced Pattern Provider connects Applied Energistics 2 autocrafting with Crea
 
 ## Requirements
 
-- Minecraft 1.20.1
-- Forge 47+
-- Applied Energistics 2 15.4.10+
-- Create 6.0.8+
-- GuideME 20.1.x
+- Minecraft 1.21.1
+- NeoForge 21.1.228+
+- Applied Energistics 2 19.2.17+
+- Create 6.0.10+
+- GuideME 21.1.x
 
 Optional integrations:
 
-- JEI 15.20+
-- Jade 11.13+
+- JEI 19.x
+- Jade 15.x
+
+A Minecraft 1.20.1 (Forge) version is also maintained — see the files list. A resource pack applying the new provider textures to the 1.20.1 release is available as a separate download.
 
 ## Pattern Recovery
 
