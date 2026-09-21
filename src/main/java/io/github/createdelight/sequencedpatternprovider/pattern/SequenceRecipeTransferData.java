@@ -5,15 +5,15 @@ import appeng.api.stacks.AEItemKey;
 import appeng.api.stacks.GenericStack;
 import com.simibubi.create.content.processing.sequenced.IAssemblyRecipe;
 import com.simibubi.create.content.processing.sequenced.SequencedAssemblyRecipe;
-import com.simibubi.create.foundation.fluid.FluidIngredient;
+import net.neoforged.neoforge.fluids.crafting.SizedFluidIngredient;
 import io.github.createdelight.sequencedpatternprovider.item.SequencePatternItem;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.level.ItemLike;
-import net.minecraftforge.fluids.FluidStack;
-import net.minecraftforge.registries.ForgeRegistries;
+import net.neoforged.neoforge.fluids.FluidStack;
+import net.minecraft.core.registries.BuiltInRegistries;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
@@ -48,7 +48,7 @@ public record SequenceRecipeTransferData(GenericStack initialInput, GenericStack
 
             List<Ingredient> itemIngredients = new ArrayList<>();
             assembly.addAssemblyIngredients(itemIngredients);
-            List<FluidIngredient> fluidIngredients = new ArrayList<>();
+            List<SizedFluidIngredient> fluidIngredients = new ArrayList<>();
             assembly.addAssemblyFluidIngredients(fluidIngredients);
             int materialCount = itemIngredients.size() + fluidIngredients.size();
             if (materialCount > 1) {
@@ -61,12 +61,12 @@ public record SequenceRecipeTransferData(GenericStack initialInput, GenericStack
                 }
                 materials[step] = new GenericStack(AEItemKey.of(material), Math.max(1, material.getCount()));
             } else if (!fluidIngredients.isEmpty()) {
-                FluidIngredient ingredient = fluidIngredients.get(0);
-                List<FluidStack> matching = ingredient.getMatchingFluidStacks();
+                SizedFluidIngredient ingredient = fluidIngredients.get(0);
+                List<FluidStack> matching = java.util.Arrays.asList(ingredient.getFluids());
                 if (matching.isEmpty()) {
                     return error("message.sequenced_pattern_provider.jei.missing_material");
                 }
-                materials[step] = new GenericStack(AEFluidKey.of(matching.get(0)), ingredient.getRequiredAmount());
+                materials[step] = new GenericStack(AEFluidKey.of(matching.get(0)), ingredient.amount());
             }
 
             Set<ItemLike> machines = new LinkedHashSet<>();
@@ -74,7 +74,7 @@ public record SequenceRecipeTransferData(GenericStack initialInput, GenericStack
             routes[step] = machines.stream()
                     .map(ItemLike::asItem)
                     .filter(item -> item != Items.AIR)
-                    .map(ForgeRegistries.ITEMS::getKey)
+                    .map(BuiltInRegistries.ITEM::getKey)
                     .filter(java.util.Objects::nonNull)
                     .findFirst()
                     .orElse(null);

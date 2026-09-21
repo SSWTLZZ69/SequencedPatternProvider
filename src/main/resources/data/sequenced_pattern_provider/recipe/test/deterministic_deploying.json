@@ -6,7 +6,7 @@
   "loops": 2,
   "results": [
     {
-      "item": "minecraft:apple"
+      "id": "minecraft:apple"
     }
   ],
   "sequence": [
@@ -22,12 +22,12 @@
       ],
       "results": [
         {
-          "item": "create:incomplete_precision_mechanism"
+          "id": "create:incomplete_precision_mechanism"
         }
       ]
     }
   ],
-  "transitionalItem": {
-    "item": "create:incomplete_precision_mechanism"
+  "transitional_item": {
+    "id": "create:incomplete_precision_mechanism"
   }
 }

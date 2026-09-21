@@ -7,7 +7,7 @@
     "SPP_ROUTES_SECOND": {"left": 38, "bottom": 115, "grid": "HORIZONTAL"},
     "SPP_INITIAL_INPUT": {"left": 10, "bottom": 169},
     "SPP_FINAL_OUTPUT": {"left": 10, "bottom": 133},
-    "BLANK_PATTERN": {"left": 147, "bottom": 161},
+    "BLANK_PATTERN": {"left": 147, "bottom": 165},
     "ENCODED_PATTERN": {"left": 147, "bottom": 118}
   },
   "text": {
@@ -17,14 +17,17 @@
     },
     "sequence_panel_title": {
       "text": {"translate": "gui.sequenced_pattern_provider.sequence_steps"},
-      "position": {"left": 8, "bottom": 178}
+      "position": {"left": 8, "bottom": 184}
     }
   },
   "terminalStyle": {
-    "bottom": {"texture": "guis/pattern.png", "srcRect": [0, 71, 195, 178]},
+    "bottom": {"texture": "guis/pattern.png", "srcRect": [0, 59, 195, 192]},
     "supportsAutoCrafting": true
   },
   "widgets": {
-    "encodePattern": {"left": 147, "bottom": 142}
+    "encodePattern": {"left": 147, "bottom": 145},
+    "decreaseLoops": {"left": 134, "bottom": 164},
+    "increaseLoops": {"left": 134, "bottom": 153},
+    "clearEncoding": {"left": 167, "bottom": 119}
   }
 }

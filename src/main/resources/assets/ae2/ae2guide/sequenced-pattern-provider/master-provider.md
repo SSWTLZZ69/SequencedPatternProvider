@@ -23,6 +23,10 @@ After connecting the blocks with AE cable, use a memory card to link them:
 
 This link does not replace AE cabling. The master and every child must still be on the same powered AE network with available channels.
 
+A child provider may also be linked to several masters. This lets multiple nine-pattern masters share one physical processing line. Record another master on the memory card, then normally right-click the same child. Keep all linked masters and that child on the same AE network.
+
+To add a master with a large existing child setup, shift-right-click the old master with a memory card, then normally right-click the new master. The new master merges the saved child-link set without replacing its existing links. Only child links are copied; patterns, running jobs, buffers and crafting locks are not.
+
 Do not shift-right-click a child while linking. That action saves the child's settings for copying instead.
 
 Before AE shows a result as craftable, every processing type in its pattern must have an online child provider connected to this master.

@@ -28,12 +28,33 @@ import net.minecraft.world.level.block.state.properties.EnumProperty;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.StateDefinition;
 import net.minecraft.world.phys.BlockHitResult;
-import net.minecraftforge.registries.ForgeRegistries;
-import net.minecraftforge.network.NetworkHooks;
+import net.minecraft.core.registries.BuiltInRegistries;
+import com.mojang.serialization.MapCodec;
+import net.minecraft.world.ItemInteractionResult;
+import net.minecraft.core.component.DataComponents;
 import org.jetbrains.annotations.Nullable;
 
 public final class ChildProviderBlock extends BaseEntityBlock {
     public static final EnumProperty<PushDirection> PUSH_DIRECTION = PatternProviderBlock.PUSH_DIRECTION;
+
+    public static final MapCodec<ChildProviderBlock> CODEC = simpleCodec(ChildProviderBlock::new);
+
+    @Override
+    protected MapCodec<? extends BaseEntityBlock> codec() { return CODEC; }
+
+    @Override
+    protected ItemInteractionResult useItemOn(ItemStack stack, BlockState state, Level level, BlockPos pos,
+                                                Player player, InteractionHand hand, BlockHitResult hit) {
+        InteractionResult result = interact(state, level, pos, player, hand, hit);
+        if (result == InteractionResult.PASS) return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
+        return result.consumesAction() ? ItemInteractionResult.sidedSuccess(level.isClientSide) : ItemInteractionResult.FAIL;
+    }
+
+    @Override
+    protected InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos, Player player,
+                                                 BlockHitResult hit) {
+        return interact(state, level, pos, player, InteractionHand.MAIN_HAND, hit);
+    }
 
     public ChildProviderBlock(Properties properties) {
         super(properties);
@@ -53,13 +74,12 @@ public final class ChildProviderBlock extends BaseEntityBlock {
     @Override
     public void setPlacedBy(Level level, BlockPos pos, BlockState state, @Nullable LivingEntity placer, ItemStack stack) {
         super.setPlacedBy(level, pos, state, placer, stack);
-        if (level.getBlockEntity(pos) instanceof ChildProviderBlockEntity child && stack.hasCustomHoverName()) {
+        if (level.getBlockEntity(pos) instanceof ChildProviderBlockEntity child && stack.has(DataComponents.CUSTOM_NAME)) {
             child.setCustomName(stack.getHoverName());
         }
     }
 
-    @Override
-    public InteractionResult use(BlockState state, Level level, BlockPos pos, Player player, InteractionHand hand, BlockHitResult hit) {
+    private InteractionResult interact(BlockState state, Level level, BlockPos pos, Player player, InteractionHand hand, BlockHitResult hit) {
         if (hand == InteractionHand.MAIN_HAND
                 && !ProviderMemoryCardInteraction.isMemoryCard(player.getMainHandItem())
                 && ProviderMemoryCardInteraction.isMemoryCard(player.getOffhandItem())) {
@@ -98,18 +118,19 @@ public final class ChildProviderBlock extends BaseEntityBlock {
         }
         // Any registered item can act as a route marker.
         if (!held.isEmpty()) {
-            var id = ForgeRegistries.ITEMS.getKey(held.getItem());
+            var id = BuiltInRegistries.ITEM.getKey(held.getItem());
             if (id != null) {
                 if (!level.isClientSide) {
                     child.addSupportedMachine(id);
-                    player.displayClientMessage(Component.translatable("message.sequenced_pattern_provider.child.capability_added", id), true);
+                    player.displayClientMessage(Component.translatable(
+                            "message.sequenced_pattern_provider.child.capability_added", id.toString()), true);
                 }
                 return InteractionResult.sidedSuccess(level.isClientSide);
             }
         }
         if (held.isEmpty()) {
             if (!level.isClientSide && player instanceof ServerPlayer serverPlayer) {
-                NetworkHooks.openScreen(serverPlayer,
+                serverPlayer.openMenu(
                         new SimpleMenuProvider((id, inventory, ignored) ->
                                 new io.github.createdelight.sequencedpatternprovider.menu.ChildProviderMenu(
                                         id, inventory, child), child.displayName()),

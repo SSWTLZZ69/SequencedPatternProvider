@@ -4,24 +4,21 @@ import io.github.createdelight.sequencedpatternprovider.pattern.SequencePatternD
 import io.github.createdelight.sequencedpatternprovider.pattern.AssemblyStepDescriptor;
 import appeng.api.stacks.AEItemKey;
 import appeng.api.stacks.GenericStack;
-import appeng.core.definitions.AEItems;
+import appeng.crafting.pattern.EncodedPatternItem;
 import com.simibubi.create.content.processing.sequenced.IAssemblyRecipe;
-import com.simibubi.create.foundation.fluid.FluidIngredient;
+import net.neoforged.neoforge.fluids.crafting.SizedFluidIngredient;
 import net.minecraft.ChatFormatting;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.core.HolderLookup;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.world.item.component.CustomData;
 import net.minecraft.nbt.ListTag;
-import net.minecraft.nbt.StringTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.InteractionHand;
-import net.minecraft.world.InteractionResult;
-import net.minecraft.world.InteractionResultHolder;
-import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.TooltipFlag;
-import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.level.Level;
 import org.jetbrains.annotations.Nullable;
@@ -31,7 +28,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
-public final class SequencePatternItem extends Item {
+public final class SequencePatternItem extends EncodedPatternItem<SequencePatternDetails> {
     private static final String RECIPE_ID = "RecipeId";
     private static final String MANUAL = "Manual";
     public static final int MAX_MANUAL_STEPS = 10;
@@ -41,38 +38,43 @@ public final class SequencePatternItem extends Item {
     }
 
     public SequencePatternItem(Properties properties) {
-        super(properties);
+        super(properties, (key, level) -> SequencePatternDetails.fromStack(key.toStack(), level), null);
+    }
+
+    private static CompoundTag data(ItemStack stack) {
+        return stack.getOrDefault(DataComponents.CUSTOM_DATA, CustomData.EMPTY).copyTag();
     }
 
     public static boolean isEncoded(ItemStack stack) {
-        return stack.getItem() instanceof SequencePatternItem && stack.hasTag() && stack.getTag().contains(RECIPE_ID);
+        return stack.getItem() instanceof SequencePatternItem && data(stack).contains(RECIPE_ID);
     }
 
     public static @Nullable ResourceLocation getRecipeId(ItemStack stack) {
         if (!isEncoded(stack)) return null;
-        return ResourceLocation.tryParse(stack.getTag().getString(RECIPE_ID));
+        return ResourceLocation.tryParse(data(stack).getString(RECIPE_ID));
     }
 
     public static void encode(ItemStack stack, ResourceLocation recipeId) {
-        CompoundTag tag = stack.getOrCreateTag();
+        CompoundTag tag = data(stack);
         tag.putString(RECIPE_ID, recipeId.toString());
         tag.remove(MANUAL);
+        stack.set(DataComponents.CUSTOM_DATA, CustomData.of(tag));
     }
 
     public static void encodeManual(ItemStack stack, ResourceLocation recipeId, GenericStack initialInput,
                                     GenericStack[] stepMaterials, ResourceLocation[] routeItems,
-                                    int loops, GenericStack output) {
-        CompoundTag tag = stack.getOrCreateTag();
+                                    int loops, GenericStack output, HolderLookup.Provider registries) {
+        CompoundTag tag = data(stack);
         tag.putString(RECIPE_ID, recipeId.toString());
         CompoundTag manual = new CompoundTag();
-        manual.put("Initial", GenericStack.writeTag(initialInput));
-        manual.put("Output", GenericStack.writeTag(output));
+        manual.put("Initial", GenericStack.writeTag(registries, initialInput));
+        manual.put("Output", GenericStack.writeTag(registries, output));
         manual.putInt("Loops", loops);
 
         ListTag materials = new ListTag();
         for (int i = 0; i < Math.min(MAX_MANUAL_STEPS, stepMaterials.length); i++) {
             if (stepMaterials[i] == null) continue;
-            CompoundTag entry = GenericStack.writeTag(stepMaterials[i]);
+            CompoundTag entry = GenericStack.writeTag(registries, stepMaterials[i]);
             entry.putInt("Slot", i);
             materials.add(entry);
         }
@@ -88,17 +90,18 @@ public final class SequencePatternItem extends Item {
         }
         manual.put("Routes", routes);
         tag.put(MANUAL, manual);
+        stack.set(DataComponents.CUSTOM_DATA, CustomData.of(tag));
     }
 
     public static boolean isManual(ItemStack stack) {
-        return isEncoded(stack) && stack.getTag().contains(MANUAL, Tag.TAG_COMPOUND);
+        return isEncoded(stack) && data(stack).contains(MANUAL, Tag.TAG_COMPOUND);
     }
 
-    public static @Nullable ManualDefinition getManualDefinition(ItemStack stack) {
+    public static @Nullable ManualDefinition getManualDefinition(ItemStack stack, HolderLookup.Provider registries) {
         if (!isManual(stack)) return null;
-        CompoundTag manual = stack.getTag().getCompound(MANUAL);
-        GenericStack initial = GenericStack.readTag(manual.getCompound("Initial"));
-        GenericStack output = GenericStack.readTag(manual.getCompound("Output"));
+        CompoundTag manual = data(stack).getCompound(MANUAL);
+        GenericStack initial = GenericStack.readTag(registries, manual.getCompound("Initial"));
+        GenericStack output = GenericStack.readTag(registries, manual.getCompound("Output"));
         if (initial == null || !(initial.what() instanceof AEItemKey)
                 || output == null || !(output.what() instanceof AEItemKey)) return null;
 
@@ -107,7 +110,7 @@ public final class SequencePatternItem extends Item {
         for (int i = 0; i < materialTags.size(); i++) {
             CompoundTag entry = materialTags.getCompound(i);
             int slot = entry.getInt("Slot");
-            if (slot >= 0 && slot < materials.length) materials[slot] = GenericStack.readTag(entry);
+            if (slot >= 0 && slot < materials.length) materials[slot] = GenericStack.readTag(registries, entry);
         }
 
         ResourceLocation[] routes = new ResourceLocation[MAX_MANUAL_STEPS];
@@ -128,7 +131,8 @@ public final class SequencePatternItem extends Item {
     }
 
     @Override
-    public void appendHoverText(ItemStack stack, @Nullable Level level, List<Component> tooltip, TooltipFlag flag) {
+    public void appendHoverText(ItemStack stack, TooltipContext context, List<Component> tooltip, TooltipFlag flag) {
+        Level level = context.level();
         ResourceLocation id = getRecipeId(stack);
         if (id == null) {
             tooltip.add(Component.translatable("tooltip.sequenced_pattern_provider.sequence_pattern.invalid").withStyle(ChatFormatting.RED));
@@ -139,8 +143,8 @@ public final class SequencePatternItem extends Item {
                 if (details == null) {
                     tooltip.add(Component.translatable("tooltip.sequenced_pattern_provider.sequence_pattern.invalid").withStyle(ChatFormatting.RED));
                 } else {
-                    if (isManual(stack)) appendManualTooltip(stack, details, tooltip);
-                    else appendRecipeTooltip(details, tooltip);
+                    if (isManual(stack)) appendManualDetails(stack, details, tooltip, context.registries());
+                    else appendRecipeDetails(details, tooltip);
                 }
             }
         }
@@ -148,42 +152,19 @@ public final class SequencePatternItem extends Item {
                 .withStyle(ChatFormatting.GRAY));
     }
 
-    @Override
-    public InteractionResultHolder<ItemStack> use(Level level, Player player, InteractionHand hand) {
-        ItemStack stack = player.getItemInHand(hand);
-        if (!player.isShiftKeyDown()) return InteractionResultHolder.pass(stack);
-        if (!level.isClientSide) replaceWithBlank(player, hand, stack);
-        return InteractionResultHolder.sidedSuccess(player.getItemInHand(hand), level.isClientSide);
-    }
-
-    @Override
-    public InteractionResult useOn(UseOnContext context) {
-        Player player = context.getPlayer();
-        if (player == null || !player.isShiftKeyDown()) return InteractionResult.PASS;
-        if (!context.getLevel().isClientSide) {
-            replaceWithBlank(player, context.getHand(), context.getItemInHand());
-        }
-        return InteractionResult.sidedSuccess(context.getLevel().isClientSide);
-    }
-
-    private static void replaceWithBlank(Player player, InteractionHand hand, ItemStack stack) {
-        player.setItemInHand(hand, AEItems.BLANK_PATTERN.stack(stack.getCount()));
-    }
-
-    private static void appendManualTooltip(ItemStack stack, SequencePatternDetails details, List<Component> tooltip) {
-        ManualDefinition manual = getManualDefinition(stack);
+    private static void appendManualDetails(ItemStack stack, SequencePatternDetails details, List<Component> tooltip, HolderLookup.Provider registries) {
+        ManualDefinition manual = getManualDefinition(stack, registries);
         if (manual == null) return;
-        tooltip.add(Component.translatable("tooltip.sequenced_pattern_provider.sequence_pattern.output",
-                manual.output().what().getDisplayName()).withStyle(ChatFormatting.GREEN));
-        tooltip.add(Component.translatable("tooltip.sequenced_pattern_provider.sequence_pattern.input",
-                formatGeneric(manual.initialInput())).withStyle(ChatFormatting.GRAY));
+        appendContractSummary(details, tooltip);
         appendProbabilityTooltip(details, tooltip);
         tooltip.add(Component.translatable("tooltip.sequenced_pattern_provider.sequence_pattern.structure",
                 details.stepsPerLoop(), manual.loops(), details.totalSteps()).withStyle(ChatFormatting.GOLD));
         for (int i = 0; i < details.stepsPerLoop(); i++) {
             String cost = manual.stepMaterials()[i] == null ? "-" : formatGeneric(manual.stepMaterials()[i]);
-            tooltip.add(Component.translatable("tooltip.sequenced_pattern_provider.sequence_pattern.step",
-                    i + 1, manual.routeItems()[i], manual.routeItems()[i], cost).withStyle(ChatFormatting.DARK_GRAY));
+            ResourceLocation route = manual.routeItems()[i];
+            String routeText = route == null ? "-" : formatRoute(route);
+            tooltip.add(Component.translatable("tooltip.sequenced_pattern_provider.sequence_pattern.manual_step",
+                    i + 1, routeText, cost).withStyle(ChatFormatting.DARK_GRAY));
         }
     }
 
@@ -192,11 +173,9 @@ public final class SequencePatternItem extends Item {
                 + stack.what().formatAmount(stack.amount(), appeng.api.stacks.AmountFormat.FULL);
     }
 
-    private static void appendRecipeTooltip(SequencePatternDetails details, List<Component> tooltip) {
+    private static void appendRecipeDetails(SequencePatternDetails details, List<Component> tooltip) {
         var recipe = details.recipe();
-        ItemStack output = recipe.resultPool.get(0).getStack();
-        tooltip.add(Component.translatable("tooltip.sequenced_pattern_provider.sequence_pattern.output", output.getHoverName())
-                .withStyle(ChatFormatting.GREEN));
+        appendContractSummary(details, tooltip);
         appendProbabilityTooltip(details, tooltip);
         if (recipe.resultPool.size() > 1) {
             String alternatives = recipe.resultPool.stream().skip(1).limit(6)
@@ -205,8 +184,6 @@ public final class SequencePatternItem extends Item {
             tooltip.add(Component.translatable("tooltip.sequenced_pattern_provider.sequence_pattern.alternatives", alternatives)
                     .withStyle(ChatFormatting.RED));
         }
-        tooltip.add(Component.translatable("tooltip.sequenced_pattern_provider.sequence_pattern.input",
-                        formatIngredient(recipe.getIngredient())).withStyle(ChatFormatting.GRAY));
         tooltip.add(Component.translatable("tooltip.sequenced_pattern_provider.sequence_pattern.structure",
                         recipe.getSequence().size(), recipe.getLoops(), details.totalSteps())
                 .withStyle(ChatFormatting.GOLD));
@@ -216,20 +193,43 @@ public final class SequencePatternItem extends Item {
             AssemblyStepDescriptor descriptor = AssemblyStepDescriptor.from(step);
             IAssemblyRecipe assembly = step.getAsAssemblyRecipe();
             List<Ingredient> itemIngredients = new ArrayList<>();
-            List<FluidIngredient> fluidIngredients = new ArrayList<>();
+            List<SizedFluidIngredient> fluidIngredients = new ArrayList<>();
             assembly.addAssemblyIngredients(itemIngredients);
             assembly.addAssemblyFluidIngredients(fluidIngredients);
 
             List<String> costs = new ArrayList<>();
             itemIngredients.stream().map(SequencePatternItem::formatIngredient).forEach(costs::add);
-            fluidIngredients.stream().map(SequencePatternItem::formatFluidIngredient).forEach(costs::add);
-            String machines = descriptor.routeKeys().stream().map(ResourceLocation::toString)
+            fluidIngredients.stream().map(SequencePatternItem::formatSizedFluidIngredient).forEach(costs::add);
+            String machines = descriptor.routeKeys().stream().map(SequencePatternItem::formatRoute)
                     .collect(Collectors.joining(", "));
             String costText = costs.isEmpty() ? "-" : String.join(", ", costs);
             tooltip.add(Component.translatable("tooltip.sequenced_pattern_provider.sequence_pattern.step",
-                            index + 1, descriptor.serializerId(), machines, costText)
+                            index + 1, descriptor.serializerId().toString(), machines, costText)
                     .withStyle(ChatFormatting.DARK_GRAY));
         }
+    }
+
+    private static void appendContractSummary(SequencePatternDetails details, List<Component> tooltip) {
+        GenericStack output = details.getPrimaryOutput();
+        if (output != null) {
+            tooltip.add(Component.translatable("tooltip.sequenced_pattern_provider.sequence_pattern.output",
+                    formatGeneric(output)).withStyle(ChatFormatting.WHITE));
+        }
+
+        SequencePatternDetails.PlannedInput[] inputs = details.plannedInputs();
+        if (inputs.length == 0 || inputs[0].choices().length == 0) return;
+        GenericStack choice = inputs[0].choices()[0];
+        long amount = Math.multiplyExact(choice.amount(), inputs[0].getMultiplier());
+        long perAttemptAmount = Math.multiplyExact(choice.amount(), inputs[0].perAttemptMultiplier());
+        tooltip.add(Component.translatable("tooltip.sequenced_pattern_provider.sequence_pattern.input",
+                formatGeneric(new GenericStack(choice.what(), amount)),
+                choice.what().formatAmount(perAttemptAmount, appeng.api.stacks.AmountFormat.FULL))
+                .withStyle(ChatFormatting.GRAY));
+    }
+
+    private static String formatRoute(ResourceLocation route) {
+        var item = BuiltInRegistries.ITEM.get(route);
+        return item == null ? route.toString() : item.getDescription().getString();
     }
 
     private static void appendProbabilityTooltip(SequencePatternDetails details, List<Component> tooltip) {
@@ -251,9 +251,9 @@ public final class SequencePatternItem extends Item {
                 .collect(Collectors.joining(" / "));
     }
 
-    private static String formatFluidIngredient(FluidIngredient ingredient) {
-        return ingredient.getMatchingFluidStacks().stream().findFirst()
-                .map(fluid -> fluid.getDisplayName().getString() + " " + ingredient.getRequiredAmount() + "mB")
+    private static String formatSizedFluidIngredient(SizedFluidIngredient ingredient) {
+        return Arrays.stream(ingredient.getFluids()).findFirst()
+                .map(fluid -> fluid.getHoverName().getString() + " " + ingredient.amount() + "mB")
                 .orElse("?");
     }
 }

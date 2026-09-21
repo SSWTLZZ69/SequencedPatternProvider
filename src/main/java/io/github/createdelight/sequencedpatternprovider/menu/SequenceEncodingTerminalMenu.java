@@ -18,13 +18,14 @@ import io.github.createdelight.sequencedpatternprovider.probability.ProbabilityP
 import io.github.createdelight.sequencedpatternprovider.pattern.SequenceRecipeTransferData;
 import io.github.createdelight.sequencedpatternprovider.part.SequenceEncodingTerminalPart;
 import net.minecraft.core.Direction;
+import net.minecraft.world.item.crafting.RecipeHolder;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
-import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraft.core.registries.BuiltInRegistries;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -164,7 +165,7 @@ public final class SequenceEncodingTerminalMenu extends MEStorageMenu {
         for (int i = 0; i < routeIds.length; i++) {
             var routeKey = part.getRoutes().getKey(i);
             if (routeKey instanceof AEItemKey itemKey) {
-                routeIds[i] = ForgeRegistries.ITEMS.getKey(itemKey.getItem());
+                routeIds[i] = BuiltInRegistries.ITEM.getKey(itemKey.getItem());
                 stepCount = i + 1;
             }
             materials[i] = part.getMaterials().getStack(i);
@@ -183,19 +184,17 @@ public final class SequenceEncodingTerminalMenu extends MEStorageMenu {
         ItemStack initialStack = initialKey.toStack((int) Math.min(Integer.MAX_VALUE, initial.amount()));
         ItemStack outputStack = outputKey.toStack((int) Math.min(Integer.MAX_VALUE, output.amount()));
         int expectedSteps = stepCount;
-        List<SequencedAssemblyRecipe> matches = getPlayer().level().getRecipeManager()
-                .getAllRecipesFor(AllRecipeTypes.SEQUENCED_ASSEMBLY.getType()).stream()
-                .filter(SequencedAssemblyRecipe.class::isInstance)
-                .map(SequencedAssemblyRecipe.class::cast)
-                .filter(recipe -> recipe.getIngredient().test(initialStack))
-                .filter(recipe -> recipe.getLoops() == part.getLoops())
-                .filter(recipe -> recipe.getSequence().size() == expectedSteps)
-                .filter(recipe -> recipe.resultPool.stream()
-                        .anyMatch(result -> ItemStack.isSameItemSameTags(result.getStack(), outputStack)))
+        List<RecipeHolder<SequencedAssemblyRecipe>> matches = getPlayer().level().getRecipeManager()
+                .<net.neoforged.neoforge.items.wrapper.RecipeWrapper, SequencedAssemblyRecipe>getAllRecipesFor(AllRecipeTypes.SEQUENCED_ASSEMBLY.getType()).stream()
+                .filter(recipe -> recipe.value().getIngredient().test(initialStack))
+                .filter(recipe -> recipe.value().getLoops() == part.getLoops())
+                .filter(recipe -> recipe.value().getSequence().size() == expectedSteps)
+                .filter(recipe -> recipe.value().resultPool.stream()
+                        .anyMatch(result -> ItemStack.isSameItemSameComponents(result.getStack(), outputStack)))
                 .toList();
         ResourceLocation selectedRecipeId = part.getSelectedRecipeId();
         if (selectedRecipeId != null) {
-            matches = matches.stream().filter(recipe -> recipe.getId().equals(selectedRecipeId)).toList();
+            matches = matches.stream().filter(recipe -> recipe.id().equals(selectedRecipeId)).toList();
         }
         if (matches.size() != 1) {
             fail(matches.isEmpty()
@@ -203,7 +202,7 @@ public final class SequenceEncodingTerminalMenu extends MEStorageMenu {
                     : "message.sequenced_pattern_provider.encoder.ambiguous_recipe", matches.size());
             return;
         }
-        if (ProbabilityPlan.create(matches.get(0), outputStack,
+        if (ProbabilityPlan.create(matches.get(0).value(), outputStack,
                 SequencedPatternProviderConfig.maxActiveJobs()) == null) {
             fail("message.sequenced_pattern_provider.encoder.probability_unsupported",
                     SequencedPatternProviderConfig.maxActiveJobs());
@@ -213,7 +212,7 @@ public final class SequenceEncodingTerminalMenu extends MEStorageMenu {
         ItemStack encoded = encodedPatternSlot.getItem();
         if (encoded.isEmpty()) {
             ItemStack blank = blankPatternSlot.getItem();
-            if (!AEItems.BLANK_PATTERN.isSameAs(blank)) {
+            if (!AEItems.BLANK_PATTERN.is(blank)) {
                 fail("message.sequenced_pattern_provider.encoder.need_blank");
                 return;
             }
@@ -227,9 +226,9 @@ public final class SequenceEncodingTerminalMenu extends MEStorageMenu {
             encoded.setCount(1);
         }
 
-        SequencePatternItem.encodeManual(encoded, matches.get(0).getId(), initial,
-                materials, routeIds, part.getLoops(), output);
-        part.setSelectedRecipeId(matches.get(0).getId());
+        SequencePatternItem.encodeManual(encoded, matches.get(0).id(), initial,
+                materials, routeIds, part.getLoops(), output, getPlayer().registryAccess());
+        part.setSelectedRecipeId(matches.get(0).id());
         part.getPatternInventory().setItemDirect(1, encoded);
         part.markForSave();
         broadcastChanges();
@@ -264,7 +263,7 @@ public final class SequenceEncodingTerminalMenu extends MEStorageMenu {
             part.getPatternInventory().setItemDirect(0, returned);
             return;
         }
-        if (AEItems.BLANK_PATTERN.isSameAs(existing)
+        if (AEItems.BLANK_PATTERN.is(existing)
                 && existing.getCount() + returned.getCount() <= existing.getMaxStackSize()) {
             ItemStack combined = existing.copy();
             combined.grow(returned.getCount());
@@ -291,7 +290,7 @@ public final class SequenceEncodingTerminalMenu extends MEStorageMenu {
 
     private void fillFromRecipeServer(String recipeIdText) {
         ResourceLocation recipeId = ResourceLocation.tryParse(recipeIdText);
-        if (recipeId == null || !(getPlayer().level().getRecipeManager().byKey(recipeId).orElse(null)
+        if (recipeId == null || !(getPlayer().level().getRecipeManager().byKey(recipeId).map(RecipeHolder::value).orElse(null)
                 instanceof SequencedAssemblyRecipe recipe)) {
             fail("message.sequenced_pattern_provider.jei.recipe_missing");
             return;
@@ -307,7 +306,7 @@ public final class SequenceEncodingTerminalMenu extends MEStorageMenu {
         for (int i = 0; i < SequencePatternItem.MAX_MANUAL_STEPS; i++) {
             part.getMaterials().setStack(i, data.materials()[i]);
             ResourceLocation route = data.routeItems()[i];
-            var item = route == null ? null : ForgeRegistries.ITEMS.getValue(route);
+            var item = route == null ? null : BuiltInRegistries.ITEM.get(route);
             part.getRoutes().setStack(i, item == null || item == net.minecraft.world.item.Items.AIR
                     ? null : new GenericStack(AEItemKey.of(item), 1));
         }
@@ -330,7 +329,7 @@ public final class SequenceEncodingTerminalMenu extends MEStorageMenu {
     public void onSlotChange(net.minecraft.world.inventory.Slot slot) {
         super.onSlotChange(slot);
         if (slot != encodedPatternSlot || !isServerSide()) return;
-        SequencePatternItem.ManualDefinition manual = SequencePatternItem.getManualDefinition(slot.getItem());
+        SequencePatternItem.ManualDefinition manual = SequencePatternItem.getManualDefinition(slot.getItem(), getPlayer().registryAccess());
         if (manual == null) return;
 
         part.getInitialInput().setStack(0, manual.initialInput());
@@ -338,7 +337,7 @@ public final class SequenceEncodingTerminalMenu extends MEStorageMenu {
         for (int i = 0; i < SequencePatternItem.MAX_MANUAL_STEPS; i++) {
             part.getMaterials().setStack(i, manual.stepMaterials()[i]);
             ResourceLocation route = manual.routeItems()[i];
-            var item = route == null ? null : ForgeRegistries.ITEMS.getValue(route);
+            var item = route == null ? null : BuiltInRegistries.ITEM.get(route);
             part.getRoutes().setStack(i, item == null ? null : new GenericStack(AEItemKey.of(item), 1));
         }
         part.setLoops(manual.loops());

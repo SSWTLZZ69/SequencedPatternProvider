@@ -28,6 +28,10 @@ Hold an item that represents this processing line and normally right-click the c
 
 One child may use several markers. This can make several steps share one processing line or distinguish different lines that use similar machines.
 
+## Sharing One Child Between Masters
+
+One child provider may be linked to several masters, which is useful when the nine pattern slots of one master are not enough. All linked masters must use the same AE network as the child. The child remains one shared line: its send buffer, front target, blocking checks and crafting lock are shared by every linked master.
+
 Empty-hand right-click opens the GUI. It shows the assigned types, AE connection, front target and temporary buffers. Use **Clear** to remove all assigned types.
 
 ## Copying Settings

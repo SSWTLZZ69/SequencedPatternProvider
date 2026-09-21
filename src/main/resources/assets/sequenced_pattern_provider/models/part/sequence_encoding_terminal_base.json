@@ -1,6 +1,6 @@
 {
   "parent": "ae2:part/display_base",
   "textures": {
-    "front": "sequenced_pattern_provider:part/sequence_encoding_terminal"
+    "front": "ae2:part/monitor_front"
   }
 }

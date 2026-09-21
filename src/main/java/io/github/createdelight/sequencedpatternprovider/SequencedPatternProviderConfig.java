@@ -1,16 +1,16 @@
 package io.github.createdelight.sequencedpatternprovider;
 
-import net.minecraftforge.common.ForgeConfigSpec;
+import net.neoforged.neoforge.common.ModConfigSpec;
 
 public final class SequencedPatternProviderConfig {
     public static final int DEFAULT_MAX_ACTIVE_JOBS = 16;
     public static final int MAX_CONFIGURED_ACTIVE_JOBS = 64;
 
-    public static final ForgeConfigSpec SERVER_SPEC;
-    public static final ForgeConfigSpec.IntValue MAX_ACTIVE_JOBS;
+    public static final ModConfigSpec SERVER_SPEC;
+    public static final ModConfigSpec.IntValue MAX_ACTIVE_JOBS;
 
     static {
-        ForgeConfigSpec.Builder builder = new ForgeConfigSpec.Builder();
+        ModConfigSpec.Builder builder = new ModConfigSpec.Builder();
         builder.push("master_provider");
         MAX_ACTIVE_JOBS = builder
                 .comment(

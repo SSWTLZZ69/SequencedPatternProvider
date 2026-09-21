@@ -20,10 +20,31 @@ import net.minecraft.world.level.block.entity.BlockEntityTicker;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
-import net.minecraftforge.network.NetworkHooks;
+import com.mojang.serialization.MapCodec;
+import net.minecraft.world.ItemInteractionResult;
+import net.minecraft.core.component.DataComponents;
 import org.jetbrains.annotations.Nullable;
 
 public final class MasterProviderBlock extends BaseEntityBlock {
+    public static final MapCodec<MasterProviderBlock> CODEC = simpleCodec(MasterProviderBlock::new);
+
+    @Override
+    protected MapCodec<? extends BaseEntityBlock> codec() { return CODEC; }
+
+    @Override
+    protected ItemInteractionResult useItemOn(ItemStack stack, BlockState state, Level level, BlockPos pos,
+                                                Player player, InteractionHand hand, BlockHitResult hit) {
+        InteractionResult result = interact(state, level, pos, player, hand, hit);
+        if (result == InteractionResult.PASS) return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
+        return result.consumesAction() ? ItemInteractionResult.sidedSuccess(level.isClientSide) : ItemInteractionResult.FAIL;
+    }
+
+    @Override
+    protected InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos, Player player,
+                                                 BlockHitResult hit) {
+        return interact(state, level, pos, player, InteractionHand.MAIN_HAND, hit);
+    }
+
     public MasterProviderBlock(Properties properties) {
         super(properties);
     }
@@ -32,15 +53,14 @@ public final class MasterProviderBlock extends BaseEntityBlock {
     public void setPlacedBy(Level level, BlockPos pos, BlockState state, @Nullable LivingEntity placer,
                             ItemStack stack) {
         super.setPlacedBy(level, pos, state, placer, stack);
-        if (stack.hasCustomHoverName()
+        if (stack.has(DataComponents.CUSTOM_NAME)
                 && level.getBlockEntity(pos) instanceof MasterProviderBlockEntity master) {
             master.setName(stack.getHoverName().getString());
             master.saveChanges();
         }
     }
 
-    @Override
-    public InteractionResult use(BlockState state, Level level, BlockPos pos, Player player, InteractionHand hand, BlockHitResult hit) {
+    private InteractionResult interact(BlockState state, Level level, BlockPos pos, Player player, InteractionHand hand, BlockHitResult hit) {
         if (hand == InteractionHand.MAIN_HAND
                 && !ProviderMemoryCardInteraction.isMemoryCard(player.getMainHandItem())
                 && ProviderMemoryCardInteraction.isMemoryCard(player.getOffhandItem())) {
@@ -63,7 +83,7 @@ public final class MasterProviderBlock extends BaseEntityBlock {
             return InteractionResult.PASS;
         }
         if (!level.isClientSide && player instanceof ServerPlayer serverPlayer) {
-            NetworkHooks.openScreen(serverPlayer,
+            serverPlayer.openMenu(
                     new SimpleMenuProvider((id, inventory, ignored) ->
                             new io.github.createdelight.sequencedpatternprovider.menu.MasterProviderMenu(
                                     id, inventory, master),

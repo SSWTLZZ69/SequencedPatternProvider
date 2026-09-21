@@ -12,15 +12,18 @@ import appeng.api.stacks.GenericStack;
 import appeng.api.storage.MEStorage;
 import appeng.api.util.AECableType;
 import appeng.block.crafting.PushDirection;
-import appeng.blockentity.grid.AENetworkBlockEntity;
+import appeng.blockentity.grid.AENetworkedBlockEntity;
 import appeng.helpers.patternprovider.PatternProviderTarget;
+import com.mojang.logging.LogUtils;
 import appeng.me.helpers.MachineSource;
 import io.github.createdelight.sequencedpatternprovider.ModRegistry;
 import io.github.createdelight.sequencedpatternprovider.block.ChildProviderBlock;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.HolderLookup;
 import net.minecraft.core.Direction;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.LongTag;
 import net.minecraft.nbt.StringTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
@@ -28,16 +31,14 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.Containers;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraftforge.common.capabilities.Capability;
-import net.minecraftforge.common.capabilities.ForgeCapabilities;
-import net.minecraftforge.common.util.LazyOptional;
-import net.minecraftforge.fluids.FluidStack;
-import net.minecraftforge.fluids.capability.IFluidHandler;
-import net.minecraftforge.fluids.capability.templates.FluidTank;
-import net.minecraftforge.items.IItemHandler;
-import net.minecraftforge.items.ItemStackHandler;
+import net.neoforged.neoforge.fluids.FluidStack;
+import net.neoforged.neoforge.fluids.capability.IFluidHandler;
+import net.neoforged.neoforge.fluids.capability.templates.FluidTank;
+import net.neoforged.neoforge.items.IItemHandler;
+import net.neoforged.neoforge.items.ItemStackHandler;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.slf4j.Logger;
 
 import java.util.LinkedHashSet;
 import java.util.ArrayList;
@@ -46,7 +47,8 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.stream.Collectors;
 
-public final class ChildProviderBlockEntity extends AENetworkBlockEntity {
+public final class ChildProviderBlockEntity extends AENetworkedBlockEntity {
+    private static final Logger LOGGER = LogUtils.getLogger();
     private final ItemStackHandler outboundItems = new ItemStackHandler(9) {
         @Override
         protected void onContentsChanged(int slot) {
@@ -72,12 +74,13 @@ public final class ChildProviderBlockEntity extends AENetworkBlockEntity {
         }
     };
 
-    private final LazyOptional<IItemHandler> inboundItemCapability = LazyOptional.of(() -> new InsertOnlyItemHandler(inboundItems));
-    private final LazyOptional<IFluidHandler> inboundFluidCapability = LazyOptional.of(() -> new FillOnlyFluidHandler(inboundFluid));
+    private final IItemHandler inboundItemCapability = new InsertOnlyItemHandler(inboundItems);
+    private final IFluidHandler inboundFluidCapability = new FillOnlyFluidHandler(inboundFluid);
     private final IActionSource actionSource;
 
     private Component customName;
     private final Set<ResourceLocation> supportedMachines = new LinkedHashSet<>();
+    private final Set<BlockPos> linkedMasters = new LinkedHashSet<>();
     private boolean blockingMode;
     private LockCraftingMode lockCraftingMode = LockCraftingMode.NONE;
     private boolean redstonePowered;
@@ -87,6 +90,7 @@ public final class ChildProviderBlockEntity extends AENetworkBlockEntity {
     private @Nullable String unlockToken;
     private @Nullable GenericStack unlockStack;
     private @Nullable Direction activeOutputSide;
+    private @Nullable Direction lastAcceptedOutputSide;
     private int nextOutputSideIndex;
 
     public ChildProviderBlockEntity(BlockPos pos, BlockState state) {
@@ -106,6 +110,7 @@ public final class ChildProviderBlockEntity extends AENetworkBlockEntity {
     public void setName(String name) {
         super.setName(name);
         this.customName = name == null || name.isBlank() ? null : Component.literal(name);
+        invalidateLinkedMasterCaches();
         saveChanges();
         markForUpdate();
     }
@@ -131,14 +136,72 @@ public final class ChildProviderBlockEntity extends AENetworkBlockEntity {
         return customName;
     }
 
+    /**
+     * Records one master that may dispatch through this shared child.
+     * The child is many-to-many; this is coordination metadata, not ownership.
+     */
+    public boolean addLinkedMaster(BlockPos masterPos) {
+        boolean changed = linkedMasters.add(masterPos.immutable());
+        if (changed) {
+            invalidateLinkedMasterCaches();
+            saveChanges();
+            markForUpdate();
+        }
+        return changed;
+    }
+
+    public boolean removeLinkedMaster(BlockPos masterPos) {
+        boolean changed = linkedMasters.remove(masterPos);
+        if (changed) {
+            invalidateLinkedMasterCaches();
+            saveChanges();
+            markForUpdate();
+        }
+        return changed;
+    }
+
+    public Set<BlockPos> getLinkedMasters() {
+        pruneMissingMasters();
+        return Set.copyOf(linkedMasters);
+    }
+
+    public boolean hasMultipleLinkedMasters() {
+        pruneMissingMasters();
+        return linkedMasters.size() > 1;
+    }
+
+    /** Invalidates cached shared-child state in every loaded linked master. */
+    public void invalidateLinkedMasterCaches() {
+        if (level == null) return;
+        for (BlockPos masterPos : linkedMasters) {
+            if (level.getBlockEntity(masterPos) instanceof MasterProviderBlockEntity master) {
+                master.onLinkedChildConfigurationChanged(worldPosition);
+            }
+        }
+    }
+
+    private void pruneMissingMasters() {
+        if (level == null) return;
+        if (linkedMasters.removeIf(pos -> level.isLoaded(pos)
+                && !(level.getBlockEntity(pos) instanceof MasterProviderBlockEntity))) {
+            invalidateLinkedMasterCaches();
+            saveChanges();
+            markForUpdate();
+        }
+    }
+
     public boolean addSupportedMachine(ResourceLocation id) {
         boolean changed = supportedMachines.add(id);
-        if (changed) saveChanges();
+        if (changed) {
+            invalidateLinkedMasterCaches();
+            saveChanges();
+        }
         return changed;
     }
 
     public void clearSupportedMachines() {
         supportedMachines.clear();
+        invalidateLinkedMasterCaches();
         saveChanges();
     }
 
@@ -311,9 +374,9 @@ public final class ChildProviderBlockEntity extends AENetworkBlockEntity {
         }
 
         ItemStackHandler itemSimulation = new ItemStackHandler(9);
-        itemSimulation.deserializeNBT(outboundItems.serializeNBT());
+        itemSimulation.deserializeNBT(level.registryAccess(), outboundItems.serializeNBT(level.registryAccess()));
         FluidTank fluidSimulation = new FluidTank(outboundFluid.getCapacity());
-        fluidSimulation.readFromNBT(outboundFluid.writeToNBT(new CompoundTag()));
+        fluidSimulation.readFromNBT(level.registryAccess(), outboundFluid.writeToNBT(level.registryAccess(), new CompoundTag()));
 
         for (GenericStack stack : stacks) {
             if (stack == null || stack.amount() <= 0
@@ -341,6 +404,7 @@ public final class ChildProviderBlockEntity extends AENetworkBlockEntity {
         OutputTarget outputTarget = findAcceptingOutputTarget(stacks, blockingInputTypes);
         if (outputTarget == null) return false;
         activeOutputSide = outputTarget.side();
+        lastAcceptedOutputSide = outputTarget.side();
         for (GenericStack stack : stacks) {
             if (stack.what() instanceof AEItemKey itemKey) {
                 ItemStack remaining = itemKey.toStack(safeInt(stack.amount()));
@@ -352,13 +416,35 @@ public final class ChildProviderBlockEntity extends AENetworkBlockEntity {
             }
         }
         onBatchAccepted(unlockToken, expectedResult);
+        LOGGER.info("SPP child accepted batch at {}: side={}, stacks={}, outboundItems={}, outboundFluid={}, "
+                        + "expectedResult={}",
+                worldPosition, activeOutputSide, stacks, getOutboundItemCount(), getOutboundFluidAmount(),
+                expectedResult);
         pushPendingOutput();
         saveChanges();
         return true;
     }
 
+    public @Nullable Direction getLastAcceptedOutputSide() {
+        return lastAcceptedOutputSide;
+    }
+
+    public boolean isOutputClear(@Nullable Direction side, Set<AEKey> outputTypes) {
+        if (hasPendingOutput()) return false;
+        if (side != null) {
+            PatternProviderTarget target = getTarget(side);
+            return target != null && !target.containsPatternInput(outputTypes);
+        }
+        // Old saved jobs did not record the output side. Check all possible
+        // destinations conservatively until those jobs finish.
+        List<OutputTarget> targets = findOutputTargets();
+        return !targets.isEmpty()
+                && targets.stream().noneMatch(target -> target.target().containsPatternInput(outputTypes));
+    }
+
     public void serverTick() {
         if (level == null) return;
+        pruneMissingMasters();
         updateRedstoneState();
         if (!getMainNode().isActive()) return;
         pushPendingOutput();
@@ -441,6 +527,8 @@ public final class ChildProviderBlockEntity extends AENetworkBlockEntity {
             if (stack.isEmpty()) continue;
             long inserted = target.insert(AEItemKey.of(stack), stack.getCount(), Actionable.MODULATE);
             if (inserted > 0) {
+                LOGGER.info("SPP child pushed item at {}: side={}, stack={}, inserted={}, remaining={}",
+                        worldPosition, activeOutputSide, stack, inserted, stack.getCount() - inserted);
                 outboundItems.extractItem(slot, safeInt(inserted), false);
                 changed = true;
             }
@@ -450,6 +538,8 @@ public final class ChildProviderBlockEntity extends AENetworkBlockEntity {
         if (!fluid.isEmpty()) {
             long inserted = target.insert(AEFluidKey.of(fluid), fluid.getAmount(), Actionable.MODULATE);
             if (inserted > 0) {
+                LOGGER.info("SPP child pushed fluid at {}: side={}, stack={}, inserted={}, remaining={}",
+                        worldPosition, activeOutputSide, fluid, inserted, fluid.getAmount() - inserted);
                 outboundFluid.drain(safeInt(inserted), IFluidHandler.FluidAction.EXECUTE);
                 changed = true;
             }
@@ -502,7 +592,7 @@ public final class ChildProviderBlockEntity extends AENetworkBlockEntity {
                 : PushDirection.ALL;
         tag.putString("PushDirection", pushDirection.name());
         if (customName != null) {
-            tag.putString("CustomName", Component.Serializer.toJson(customName));
+            tag.putString("CustomName", Component.Serializer.toJson(customName, level.registryAccess()));
         }
         return tag;
     }
@@ -522,7 +612,7 @@ public final class ChildProviderBlockEntity extends AENetworkBlockEntity {
         }
         resetCraftingLock();
         if (tag.contains("CustomName", Tag.TAG_STRING)) {
-            Component importedName = Component.Serializer.fromJson(tag.getString("CustomName"));
+            Component importedName = Component.Serializer.fromJson(tag.getString("CustomName"), level.registryAccess());
             setName(importedName == null ? "" : importedName.getString());
         } else {
             setName("");
@@ -540,6 +630,7 @@ public final class ChildProviderBlockEntity extends AENetworkBlockEntity {
         }
         redstoneStateInitialized = false;
         onPushDirectionChanged();
+        invalidateLinkedMasterCaches();
         markForUpdate();
     }
 
@@ -549,58 +640,49 @@ public final class ChildProviderBlockEntity extends AENetworkBlockEntity {
         return direction == outputSide ? AECableType.NONE : AECableType.SMART;
     }
 
-    @Override
-    public <T> LazyOptional<T> getCapability(@NotNull Capability<T> capability, @Nullable Direction side) {
-        if (capability == ForgeCapabilities.ITEM_HANDLER) {
-            return inboundItemCapability.cast();
-        }
-        if (capability == ForgeCapabilities.FLUID_HANDLER) {
-            return inboundFluidCapability.cast();
-        }
-        return super.getCapability(capability, side);
-    }
+    public IItemHandler inboundItemHandler() { return inboundItemCapability; }
+    public IFluidHandler inboundFluidHandler() { return inboundFluidCapability; }
 
     @Override
-    public void invalidateCaps() {
-        super.invalidateCaps();
-        inboundItemCapability.invalidate();
-        inboundFluidCapability.invalidate();
-    }
-
-    @Override
-    public void saveAdditional(CompoundTag tag) {
-        super.saveAdditional(tag);
-        tag.put("OutboundItems", outboundItems.serializeNBT());
-        tag.put("InboundItems", inboundItems.serializeNBT());
-        tag.put("OutboundFluid", outboundFluid.writeToNBT(new CompoundTag()));
-        tag.put("InboundFluid", inboundFluid.writeToNBT(new CompoundTag()));
+    public void saveAdditional(CompoundTag tag, HolderLookup.Provider registries) {
+        super.saveAdditional(tag, registries);
+        tag.put("OutboundItems", outboundItems.serializeNBT(registries));
+        tag.put("InboundItems", inboundItems.serializeNBT(registries));
+        tag.put("OutboundFluid", outboundFluid.writeToNBT(registries, new CompoundTag()));
+        tag.put("InboundFluid", inboundFluid.writeToNBT(registries, new CompoundTag()));
         ListTag capabilities = new ListTag();
         supportedMachines.forEach(id -> capabilities.add(StringTag.valueOf(id.toString())));
         tag.put("SupportedMachines", capabilities);
+        ListTag masterList = new ListTag();
+        linkedMasters.forEach(pos -> masterList.add(LongTag.valueOf(pos.asLong())));
+        tag.put("LinkedMasters", masterList);
         tag.putBoolean("BlockingMode", blockingMode);
         tag.putString("LockCraftingMode", lockCraftingMode.name());
         tag.putBoolean("PulseLocked", pulseLocked);
         tag.putBoolean("PulseArmed", pulseArmed);
         if (unlockToken != null) tag.putString("UnlockToken", unlockToken);
-        if (unlockStack != null) tag.put("UnlockStack", GenericStack.writeTag(unlockStack));
+        if (unlockStack != null) tag.put("UnlockStack", GenericStack.writeTag(registries, unlockStack));
         if (activeOutputSide != null) tag.putString("ActiveOutputSide", activeOutputSide.getName());
         tag.putInt("NextOutputSideIndex", nextOutputSideIndex);
-        if (customName != null) tag.putString("CustomName", Component.Serializer.toJson(customName));
+        if (customName != null) tag.putString("CustomName", Component.Serializer.toJson(customName, registries));
     }
 
     @Override
-    public void loadTag(CompoundTag tag) {
-        super.loadTag(tag);
-        outboundItems.deserializeNBT(tag.getCompound("OutboundItems"));
-        inboundItems.deserializeNBT(tag.getCompound("InboundItems"));
-        outboundFluid.readFromNBT(tag.getCompound("OutboundFluid"));
-        inboundFluid.readFromNBT(tag.getCompound("InboundFluid"));
+    public void loadTag(CompoundTag tag, HolderLookup.Provider registries) {
+        super.loadTag(tag, registries);
+        outboundItems.deserializeNBT(registries, tag.getCompound("OutboundItems"));
+        inboundItems.deserializeNBT(registries, tag.getCompound("InboundItems"));
+        outboundFluid.readFromNBT(registries, tag.getCompound("OutboundFluid"));
+        inboundFluid.readFromNBT(registries, tag.getCompound("InboundFluid"));
         supportedMachines.clear();
         ListTag capabilities = tag.getList("SupportedMachines", Tag.TAG_STRING);
         capabilities.forEach(value -> {
             ResourceLocation id = ResourceLocation.tryParse(value.getAsString());
             if (id != null) supportedMachines.add(id);
         });
+        linkedMasters.clear();
+        ListTag masterList = tag.getList("LinkedMasters", Tag.TAG_LONG);
+        masterList.forEach(value -> linkedMasters.add(BlockPos.of(((LongTag) value).getAsLong())));
         blockingMode = tag.getBoolean("BlockingMode");
         try {
             lockCraftingMode = LockCraftingMode.valueOf(tag.getString("LockCraftingMode"));
@@ -611,13 +693,13 @@ public final class ChildProviderBlockEntity extends AENetworkBlockEntity {
         pulseArmed = tag.getBoolean("PulseArmed");
         unlockToken = tag.contains("UnlockToken", Tag.TAG_STRING) ? tag.getString("UnlockToken") : null;
         unlockStack = tag.contains("UnlockStack", Tag.TAG_COMPOUND)
-                ? GenericStack.readTag(tag.getCompound("UnlockStack")) : null;
+                ? GenericStack.readTag(registries, tag.getCompound("UnlockStack")) : null;
         activeOutputSide = tag.contains("ActiveOutputSide", Tag.TAG_STRING)
                 ? Direction.byName(tag.getString("ActiveOutputSide")) : null;
         nextOutputSideIndex = Math.floorMod(tag.getInt("NextOutputSideIndex"), Direction.values().length);
         redstoneStateInitialized = false;
         if (tag.contains("CustomName", Tag.TAG_STRING)) {
-            customName = Component.Serializer.fromJson(tag.getString("CustomName"));
+            customName = Component.Serializer.fromJson(tag.getString("CustomName"), registries);
         } else {
             Component inheritedName = super.getCustomName();
             customName = inheritedName == null || inheritedName.getString().isBlank() ? null : inheritedName;

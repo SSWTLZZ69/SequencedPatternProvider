@@ -13,7 +13,7 @@ import appeng.api.stacks.GenericStack;
 import appeng.api.stacks.KeyCounter;
 import appeng.api.storage.MEStorage;
 import appeng.api.util.AECableType;
-import appeng.blockentity.grid.AENetworkBlockEntity;
+import appeng.blockentity.grid.AENetworkedBlockEntity;
 import com.mojang.logging.LogUtils;
 import io.github.createdelight.sequencedpatternprovider.ModRegistry;
 import io.github.createdelight.sequencedpatternprovider.SequencedPatternProviderConfig;
@@ -22,9 +22,11 @@ import io.github.createdelight.sequencedpatternprovider.pattern.AssemblyStepDesc
 import io.github.createdelight.sequencedpatternprovider.pattern.SequencePatternDetails;
 import io.github.createdelight.sequencedpatternprovider.probability.ProbabilityPlan;
 import io.github.createdelight.sequencedpatternprovider.tracking.AttemptToken;
+import io.github.createdelight.sequencedpatternprovider.tracking.FinalOutputDrain;
 import io.github.createdelight.sequencedpatternprovider.tracking.TokenlessReturnSelector;
 import it.unimi.dsi.fastutil.objects.Object2LongMap;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.HolderLookup;
 import net.minecraft.core.Direction;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
@@ -39,7 +41,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
-import net.minecraftforge.items.ItemStackHandler;
+import net.neoforged.neoforge.items.ItemStackHandler;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -51,7 +53,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
-public final class MasterProviderBlockEntity extends AENetworkBlockEntity implements ICraftingProvider {
+public final class MasterProviderBlockEntity extends AENetworkedBlockEntity implements ICraftingProvider {
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final int MAX_PERSISTED_ACTIVE_JOBS = SequencedPatternProviderConfig.MAX_CONFIGURED_ACTIVE_JOBS;
     private final Map<ResourceLocation, SequencePatternDetails> patternDetailsCache = new HashMap<>();
@@ -61,6 +63,7 @@ public final class MasterProviderBlockEntity extends AENetworkBlockEntity implem
     private final Set<UUID> watchedAttemptIds = new LinkedHashSet<>();
     private final Set<Item> trackedWorkpieceItems = new LinkedHashSet<>();
     private final Set<AEItemKey> loggedAmbiguousTokenlessReturns = new HashSet<>();
+    private final Set<AEItemKey> loggedUnsafeTokenlessReturns = new HashSet<>();
     private final Map<ProbabilityKey, Long> probabilityRemainders = new HashMap<>();
     private boolean inventoryTrackingDirty = true;
     private final ItemStackHandler patterns = new ItemStackHandler(9) {
@@ -73,6 +76,7 @@ public final class MasterProviderBlockEntity extends AENetworkBlockEntity implem
         protected void onContentsChanged(int slot) {
             patternDetailsCache.clear();
             blockingInputsByChild.clear();
+            invalidateLinkedChildCaches();
             ICraftingProvider.requestUpdate(getMainNode());
             saveChanges();
         }
@@ -95,18 +99,131 @@ public final class MasterProviderBlockEntity extends AENetworkBlockEntity implem
     @Override
     public void onReady() {
         super.onReady();
+        synchronizeLinkedChildren();
         ICraftingProvider.requestUpdate(getMainNode());
     }
 
+    /**
+     * Linking is allowed while one side is still offline, but an already
+     * active master and child must never be accepted across two AE grids.
+     */
+    public boolean isLinkNetworkCompatible(ChildProviderBlockEntity child) {
+        IGrid masterGrid = getMainNode().getGrid();
+        IGrid childGrid = child.getMainNode().getGrid();
+        return masterGrid == null || childGrid == null || masterGrid == childGrid;
+    }
+
     public boolean addChild(BlockPos pos) {
-        if (level == null || !(level.getBlockEntity(pos) instanceof ChildProviderBlockEntity)) return false;
+        if (level == null || !(level.getBlockEntity(pos) instanceof ChildProviderBlockEntity child)) return false;
         if (children.contains(pos)) return false;
-        children.add(pos.immutable());
+        if (!isLinkNetworkCompatible(child)) return false;
+        addChildReference(pos, child);
         nextChildIndexByRoute.clear();
         blockingInputsByChild.clear();
         ICraftingProvider.requestUpdate(getMainNode());
         saveChanges();
         return true;
+    }
+
+    private void addChildReference(BlockPos pos, @Nullable ChildProviderBlockEntity child) {
+        children.add(pos.immutable());
+        if (child != null) child.addLinkedMaster(worldPosition);
+    }
+
+    /**
+     * Exports the complete child-link profile while preserving MasterPos so the
+     * same card remains usable for the existing child-by-child link workflow.
+     */
+    public CompoundTag exportMemoryCardSettings() {
+        CompoundTag tag = new CompoundTag();
+        if (level != null) tag.putString("Dimension", level.dimension().location().toString());
+        tag.putLong("MasterPos", worldPosition.asLong());
+        ListTag childList = new ListTag();
+        children.forEach(childPos -> childList.add(LongTag.valueOf(childPos.asLong())));
+        tag.put("Children", childList);
+        return tag;
+    }
+
+    /**
+     * Merges a saved child-link profile into this master. Existing links are
+     * retained, loaded invalid blocks are skipped, and unloaded positions are
+     * kept as deferred references for the normal runtime validation path.
+     */
+    public ChildLinkImportResult importMemoryCardSettings(CompoundTag tag) {
+        if (level == null) return new ChildLinkImportResult(0, 0, 0, 0);
+
+        int added = 0;
+        int existing = 0;
+        int skipped = 0;
+        int deferred = 0;
+        ListTag childList = tag.getList("Children", Tag.TAG_LONG);
+        for (int index = 0; index < childList.size(); index++) {
+            BlockPos childPos = BlockPos.of(((LongTag) childList.get(index)).getAsLong());
+            if (children.contains(childPos)) {
+                existing++;
+                continue;
+            }
+
+            if (level.getBlockEntity(childPos) instanceof ChildProviderBlockEntity child) {
+                if (!isLinkNetworkCompatible(child)) {
+                    skipped++;
+                    continue;
+                }
+                addChildReference(childPos, child);
+                added++;
+            } else if (!level.isLoaded(childPos)) {
+                addChildReference(childPos, null);
+                added++;
+                deferred++;
+            } else {
+                skipped++;
+            }
+        }
+
+        if (added > 0) {
+            nextChildIndexByRoute.clear();
+            blockingInputsByChild.clear();
+            ICraftingProvider.requestUpdate(getMainNode());
+            saveChanges();
+        }
+        return new ChildLinkImportResult(added, existing, deferred, skipped);
+    }
+
+    public record ChildLinkImportResult(int added, int existing, int deferred, int skipped) {
+    }
+
+    private void synchronizeLinkedChildren() {
+        if (level == null) return;
+        for (BlockPos childPos : children) {
+            if (level.getBlockEntity(childPos) instanceof ChildProviderBlockEntity child) {
+                child.addLinkedMaster(worldPosition);
+            }
+        }
+    }
+
+    private void invalidateLinkedChildCaches() {
+        if (level == null) return;
+        for (BlockPos childPos : children) {
+            if (level.getBlockEntity(childPos) instanceof ChildProviderBlockEntity child) {
+                child.invalidateLinkedMasterCaches();
+            }
+        }
+    }
+
+    void onLinkedChildConfigurationChanged(BlockPos childPos) {
+        blockingInputsByChild.remove(childPos);
+        ICraftingProvider.requestUpdate(getMainNode());
+    }
+
+    boolean isLinkedChild(BlockPos childPos) {
+        return children.contains(childPos);
+    }
+
+    private boolean isChildActiveOnThisGrid(ChildProviderBlockEntity child) {
+        IGrid masterGrid = getMainNode().getGrid();
+        return masterGrid != null
+                && child.getMainNode().isActive()
+                && child.getMainNode().getGrid() == masterGrid;
     }
 
     public void serverTick() {
@@ -155,6 +272,11 @@ public final class MasterProviderBlockEntity extends AENetworkBlockEntity implem
             }
 
             if (job.resultObserved) {
+                if (!isFinalOutputDrained(job, details)) {
+                    index++;
+                    continue;
+                }
+                releaseJobLock(job);
                 LOGGER.info("SPP completed active job at {}: recipe={}, finalStep={}, "
                                 + "resultObserved={}, child={}",
                         worldPosition, job.recipeId, job.step,
@@ -171,6 +293,10 @@ public final class MasterProviderBlockEntity extends AENetworkBlockEntity implem
     }
 
     private boolean dispatchCurrentStep(ActiveJob job, SequencePatternDetails details) {
+        // Expanded probability batches retain their lease through physical
+        // final-output drainage, not just Create's result computation.
+        if (details.probabilityPlan().batchSize() > 1 && isRecipeReservedByAnotherJob(job)) return false;
+
         AssemblyStepDescriptor descriptor = details.stepDescriptor(job.step);
         List<GenericStack> dispatch = new ArrayList<>();
         List<Integer> consumedIndices = new ArrayList<>();
@@ -204,7 +330,20 @@ public final class MasterProviderBlockEntity extends AENetworkBlockEntity implem
         consumedIndices.forEach(index -> job.consumed[index] = true);
         job.workpiece = ItemStack.EMPTY;
         inventoryTrackingDirty = true;
+        if (details.probabilityPlan().batchSize() > 1) {
+            LOGGER.info("SPP probability dispatch at {}: recipe={}, batch={}, attempt={}, step={}, child={}, "
+                            + "stacks={}, consumedIndices={}",
+                    worldPosition, job.recipeId, job.batchId, job.attemptId, job.step,
+                    job.lastChildPos, dispatch, consumedIndices);
+        }
         return true;
+    }
+
+    private boolean isRecipeReservedByAnotherJob(ActiveJob currentJob) {
+        for (ActiveJob other : jobs) {
+            if (other != currentJob && other.dispatched && other.recipeId.equals(currentJob.recipeId)) return true;
+        }
+        return false;
     }
 
     private @Nullable GenericStack tagInitialWorkpiece(ActiveJob job, SequencePatternDetails details,
@@ -244,11 +383,12 @@ public final class MasterProviderBlockEntity extends AENetworkBlockEntity implem
             BlockPos childPos = children.get(index);
             if (exclusiveChildLease && isChildReservedByAnotherJob(childPos, job)) continue;
             if (level.getBlockEntity(childPos) instanceof ChildProviderBlockEntity child
-                    && child.getMainNode().isActive()
+                    && isChildActiveOnThisGrid(child)
                     && child.supportsAny(routeKeys)
                     && child.accept(dispatch, getBlockingInputTypes(child), unlockToken, expectedResult)) {
                 nextChildIndexByRoute.put(routeKeys, (index + 1) % childCount);
                 job.lastChildPos = childPos;
+                job.lastOutputSide = child.getLastAcceptedOutputSide();
                 job.unlockToken = unlockToken;
                 job.resultObserved = false;
                 LOGGER.debug("SPP dispatched sequence step at {}: recipe={}, step={}, child={}, expectedResult={}",
@@ -267,40 +407,58 @@ public final class MasterProviderBlockEntity extends AENetworkBlockEntity implem
     }
 
     private Set<AEKey> getBlockingInputTypes(ChildProviderBlockEntity child) {
+        // Repair the reverse link before entering computeIfAbsent; registering
+        // it can invalidate this very cache entry.
+        child.addLinkedMaster(worldPosition);
         return blockingInputsByChild.computeIfAbsent(child.getBlockPos(), ignored -> {
             Set<AEKey> result = new LinkedHashSet<>();
-            for (int slot = 0; slot < patterns.getSlots(); slot++) {
-                SequencePatternDetails details = SequencePatternDetails.fromStack(patterns.getStackInSlot(slot), level);
-                if (details == null) continue;
-
-                for (SequencePatternDetails.PlannedInput input : details.plannedInputs()) {
-                    if (!child.supportsAny(details.stepDescriptor(input.step()).routeKeys())) continue;
-                    for (GenericStack choice : input.choices()) {
-                        if (choice != null) result.add(choice.what().dropSecondary());
-                    }
+            for (BlockPos masterPos : child.getLinkedMasters()) {
+                if (level.getBlockEntity(masterPos) instanceof MasterProviderBlockEntity master
+                        && master.isLinkedChild(child.getBlockPos())
+                        && master.isChildActiveOnThisGrid(child)) {
+                    master.addBlockingInputTypesForChild(child, result);
                 }
+            }
+            // Include this master even if the reverse link is still being
+            // repaired during a legacy-world load.
+            addBlockingInputTypesForChild(child, result);
+            return Set.copyOf(result);
+        });
+    }
 
-                AEItemKey transitional = AEItemKey.of(details.recipe().getTransitionalItem());
-                if (transitional != null) {
-                    for (int step = 1; step < details.totalSteps(); step++) {
-                        if (child.supportsAny(details.stepDescriptor(step).routeKeys())) {
-                            result.add(transitional.dropSecondary());
-                            break;
-                        }
+    private void addBlockingInputTypesForChild(ChildProviderBlockEntity child, Set<AEKey> result) {
+        if (level == null) return;
+        for (int slot = 0; slot < patterns.getSlots(); slot++) {
+            SequencePatternDetails details = SequencePatternDetails.fromStack(patterns.getStackInSlot(slot), level);
+            if (details == null) continue;
+
+            for (SequencePatternDetails.PlannedInput input : details.plannedInputs()) {
+                if (!child.supportsAny(details.stepDescriptor(input.step()).routeKeys())) continue;
+                for (GenericStack choice : input.choices()) {
+                    if (choice != null) result.add(choice.what().dropSecondary());
+                }
+            }
+
+            AEItemKey transitional = AEItemKey.of(details.recipe().getTransitionalItem());
+            if (transitional != null) {
+                for (int step = 1; step < details.totalSteps(); step++) {
+                    if (child.supportsAny(details.stepDescriptor(step).routeKeys())) {
+                        result.add(transitional.dropSecondary());
+                        break;
                     }
                 }
             }
-            return Set.copyOf(result);
-        });
+        }
     }
 
     private boolean hasMatchingChild(AssemblyStepDescriptor descriptor) {
         if (level == null) return false;
         removeMissingChildren();
         for (BlockPos pos : children) {
-            if (level.getBlockEntity(pos) instanceof ChildProviderBlockEntity child
-                    && child.getMainNode().isActive()
-                    && child.supportsAny(descriptor.routeKeys())) return true;
+            if (level.getBlockEntity(pos) instanceof ChildProviderBlockEntity child) {
+                child.addLinkedMaster(worldPosition);
+                if (isChildActiveOnThisGrid(child) && child.supportsAny(descriptor.routeKeys())) return true;
+            }
         }
         return false;
     }
@@ -314,11 +472,33 @@ public final class MasterProviderBlockEntity extends AENetworkBlockEntity implem
     }
 
     public void clearChildren() {
+        List<BlockPos> oldChildren = List.copyOf(children);
         children.clear();
+        if (level != null) {
+            for (BlockPos childPos : oldChildren) {
+                if (level.getBlockEntity(childPos) instanceof ChildProviderBlockEntity child) {
+                    child.removeLinkedMaster(worldPosition);
+                }
+            }
+        }
         nextChildIndexByRoute.clear();
         blockingInputsByChild.clear();
         ICraftingProvider.requestUpdate(getMainNode());
         saveChanges();
+    }
+
+    private void unlinkAllChildren() {
+        List<BlockPos> oldChildren = List.copyOf(children);
+        children.clear();
+        if (level != null) {
+            for (BlockPos childPos : oldChildren) {
+                if (level.getBlockEntity(childPos) instanceof ChildProviderBlockEntity child) {
+                    child.removeLinkedMaster(worldPosition);
+                }
+            }
+        }
+        nextChildIndexByRoute.clear();
+        blockingInputsByChild.clear();
     }
 
     public ItemStackHandler getPatternInventory() {
@@ -387,8 +567,13 @@ public final class MasterProviderBlockEntity extends AENetworkBlockEntity implem
         long masterExtracted = masterExtractionCredits.getOrDefault(itemKey, 0L);
         masterExtractionCredits.remove(itemKey);
         long netArrivals = currentAmount - previousAmount + masterExtracted;
-        if (netArrivals > 0 && isWatchedItem(itemKey)) {
-            recordPendingArrival(itemKey, netArrivals);
+        if (netArrivals > 0) {
+            if (isWatchedItem(itemKey)) {
+                recordPendingArrival(itemKey, netArrivals);
+            } else if (AttemptToken.read(itemKey.toStack()) == null
+                    && !allowsTokenlessFallback()) {
+                logUnsafeTokenlessReturn(itemKey);
+            }
         } else if (netArrivals < 0) {
             // A player or another network consumer removed a previously observed
             // arrival before this master could claim it. Do not retain a phantom
@@ -420,6 +605,7 @@ public final class MasterProviderBlockEntity extends AENetworkBlockEntity implem
         watchedAttemptIds.addAll(desiredAttemptIds);
         pendingIntermediateArrivals.keySet().removeIf(key -> !isWatchedItem(key));
         loggedAmbiguousTokenlessReturns.retainAll(pendingIntermediateArrivals.keySet());
+        loggedUnsafeTokenlessReturns.retainAll(pendingIntermediateArrivals.keySet());
 
         if (jobs.isEmpty()) {
             clearInventoryTracking();
@@ -463,7 +649,31 @@ public final class MasterProviderBlockEntity extends AENetworkBlockEntity implem
         masterExtractionCredits.clear();
         pendingIntermediateArrivals.clear();
         loggedAmbiguousTokenlessReturns.clear();
+        loggedUnsafeTokenlessReturns.clear();
         inventoryTrackingDirty = false;
+    }
+
+    /**
+     * A tokenless return is only safe while every linked child has one logical
+     * master. Once a child is shared, refusing the fallback is safer than
+     * letting two masters claim the same indistinguishable stack.
+     */
+    private boolean allowsTokenlessFallback() {
+        if (level == null) return true;
+        for (BlockPos childPos : children) {
+            if (level.getBlockEntity(childPos) instanceof ChildProviderBlockEntity child) {
+                child.addLinkedMaster(worldPosition);
+                if (child.hasMultipleLinkedMasters()) return false;
+            }
+        }
+        return true;
+    }
+
+    private void logUnsafeTokenlessReturn(AEItemKey itemKey) {
+        if (loggedUnsafeTokenlessReturns.add(itemKey)) {
+            LOGGER.warn("SPP refused tokenless intermediate at {} because a child is shared by multiple masters: item={}",
+                    worldPosition, itemKey);
+        }
     }
 
     private boolean isWatchedItem(AEItemKey itemKey) {
@@ -475,7 +685,7 @@ public final class MasterProviderBlockEntity extends AENetworkBlockEntity implem
                     && attempt.masterPos().equals(worldPosition)
                     && watchedAttemptIds.contains(attempt.attemptId());
         }
-        return !findTokenlessReturnCandidates(stack).isEmpty();
+        return allowsTokenlessFallback() && !findTokenlessReturnCandidates(stack).isEmpty();
     }
 
     private boolean isTrackedItem(AEItemKey itemKey) {
@@ -514,13 +724,17 @@ public final class MasterProviderBlockEntity extends AENetworkBlockEntity implem
             matchedJob = findJobByAttempt(attempt.attemptId());
             if (matchedJob == null || !matchesReturnedWorkpiece(stack, matchedJob)) return 0;
         } else {
+            if (!allowsTokenlessFallback()) {
+                logUnsafeTokenlessReturn(itemKey);
+                return 0;
+            }
             List<TokenlessReturnSelector.Candidate<ActiveJob>> candidates = findTokenlessReturnCandidates(stack);
             matchedJob = TokenlessReturnSelector.select(candidates);
             if (matchedJob == null) {
                 if (!candidates.isEmpty() && loggedAmbiguousTokenlessReturns.add(itemKey)) {
                     LOGGER.warn("SPP refused ambiguous tokenless intermediate at {}: item={}, candidates={}; "
                                     + "tag={}; candidates differ by recipe or dispatched step",
-                            worldPosition, itemKey, candidates.size(), stack.getTag());
+                            worldPosition, itemKey, candidates.size(), stack.getComponents());
                 }
                 return 0;
             }
@@ -561,15 +775,24 @@ public final class MasterProviderBlockEntity extends AENetworkBlockEntity implem
                     matchedJob.lastChildPos, arrivalCount - 1, tokenlessFallback);
         } else if (unprocessed) {
             int retryStep = matchedJob.step;
+            String childState = "missing";
+            if (matchedJob.lastChildPos != null
+                    && level.getBlockEntity(matchedJob.lastChildPos) instanceof ChildProviderBlockEntity child) {
+                childState = "outboundItems=" + child.getOutboundItemCount()
+                        + ", outboundFluid=" + child.getOutboundFluidAmount()
+                        + ", waitingForResult=" + (matchedJob.unlockToken != null
+                        && child.isWaitingForResult(matchedJob.unlockToken));
+            }
             releaseJobLock(matchedJob);
             matchedJob.workpiece = claimedStack;
             matchedJob.dispatched = false;
             matchedJob.resultObserved = false;
             inventoryTrackingDirty = true;
-            LOGGER.debug("SPP reclaimed unprocessed workpiece at {}: recipe={}, step={}, attempt={}, "
-                            + "child={}, tokenlessFallback={}; retrying the same attempt",
-                    worldPosition, matchedJob.recipeId, retryStep, matchedJob.attemptId,
-                    matchedJob.lastChildPos, tokenlessFallback);
+            LOGGER.info("SPP reclaimed unprocessed workpiece at {}: recipe={}, batch={}, step={}, attempt={}, "
+                            + "child={}, childState=[{}], consumedIndices={}, tokenlessFallback={}; "
+                            + "retrying the same attempt",
+                    worldPosition, matchedJob.recipeId, matchedJob.batchId, retryStep, matchedJob.attemptId,
+                    matchedJob.lastChildPos, childState, consumedInputIndices(matchedJob), tokenlessFallback);
         }
         return 1;
     }
@@ -597,7 +820,9 @@ public final class MasterProviderBlockEntity extends AENetworkBlockEntity implem
     }
 
     private @Nullable TokenlessReturnSelector.MatchKind classifyReturnedWorkpiece(ItemStack stack, ActiveJob job) {
-        if (!job.dispatched) return null;
+        // A completed attempt waiting for physical output drainage must not be
+        // reopened by a stale intermediate arrival from the same machine tick.
+        if (!job.dispatched || job.resultObserved) return null;
         SequencePatternDetails details = findPatternDetails(job.recipeId);
         if (details == null) return null;
         int returnedStep = getAssemblyStep(stack, job.recipeId,
@@ -616,9 +841,9 @@ public final class MasterProviderBlockEntity extends AENetworkBlockEntity implem
 
     private int getAssemblyStep(ItemStack stack, ResourceLocation recipeId, Item transitionalItem) {
         if (stack.getItem() != transitionalItem) return -1;
-        CompoundTag assembly = stack.getTagElement("SequencedAssembly");
-        if (assembly == null || !recipeId.toString().equals(assembly.getString("id"))) return -1;
-        return assembly.getInt("Step");
+        var assembly = stack.get(com.simibubi.create.AllDataComponents.SEQUENCED_ASSEMBLY);
+        if (assembly == null || !recipeId.equals(assembly.id())) return -1;
+        return assembly.step();
     }
 
     private boolean matchesInitialWorkpiece(ItemStack stack, ActiveJob job, SequencePatternDetails details) {
@@ -652,6 +877,25 @@ public final class MasterProviderBlockEntity extends AENetworkBlockEntity implem
         inventoryTrackingDirty = true;
     }
 
+    private boolean isFinalOutputDrained(ActiveJob job, SequencePatternDetails details) {
+        if (details.probabilityPlan().batchSize() <= 1) return true;
+        if (job.finalOutputDrain == null) {
+            // Also restart the settling interval for completed jobs restored
+            // from disk, since the destination may just have been loaded.
+            job.finalOutputDrain = new FinalOutputDrain(level.getGameTime());
+        }
+        return job.finalOutputDrain.isReady(level.getGameTime(), () -> {
+            if (job.lastChildPos == null
+                    || !(level.getBlockEntity(job.lastChildPos) instanceof ChildProviderBlockEntity child)) {
+                return false;
+            }
+            Set<AEKey> outputTypes = new LinkedHashSet<>();
+            outputTypes.add(AEItemKey.of(details.recipe().getTransitionalItem()).dropSecondary());
+            if (!job.plannedOutput.isEmpty()) outputTypes.add(AEItemKey.of(job.plannedOutput).dropSecondary());
+            return child.isOutputClear(job.lastOutputSide, outputTypes);
+        });
+    }
+
     /**
      * Called from the Create final-step mixin. A non-null return value, including
      * ItemStack.EMPTY, means this tracked attempt was valid and its planned
@@ -665,7 +909,14 @@ public final class MasterProviderBlockEntity extends AENetworkBlockEntity implem
             if (details == null || !job.dispatched || job.step != details.totalSteps() - 1) return null;
             if (!job.resultObserved) {
                 job.resultObserved = true;
-                releaseJobLock(job);
+                if (details.probabilityPlan().batchSize() > 1) {
+                    job.finalOutputDrain = new FinalOutputDrain(level.getGameTime());
+                    LOGGER.info("SPP probability result computed; waiting for destination to drain at {}: "
+                                    + "batch={}, attempt={}, child={}, result={}",
+                            worldPosition, job.batchId, job.attemptId, job.lastChildPos, job.plannedOutput);
+                } else {
+                    releaseJobLock(job);
+                }
                 inventoryTrackingDirty = true;
                 LOGGER.debug("SPP completed tracked attempt at {}: recipe={}, attempt={}, result={}",
                         worldPosition, recipeId, attemptId,
@@ -714,6 +965,7 @@ public final class MasterProviderBlockEntity extends AENetworkBlockEntity implem
         for (ActiveJob job : jobs) returnUndispatchedInputs(job);
         jobs.clear();
         clearInventoryTracking();
+        unlinkAllChildren();
         for (int slot = 0; slot < patterns.getSlots(); slot++) {
             ItemStack pattern = patterns.extractItem(slot, 1, false);
             if (!pattern.isEmpty()) {
@@ -768,6 +1020,12 @@ public final class MasterProviderBlockEntity extends AENetworkBlockEntity implem
             ActiveJob job = new ActiveJob(details.recipeId(), splitInputs.get(attempt),
                     new boolean[inputHolder.length], UUID.randomUUID(), batchId, plannedOutputs.get(attempt));
             jobs.add(job);
+            if (batchSize > 1) {
+                LOGGER.info("SPP probability attempt accepted at {}: recipe={}, batch={}, attemptIndex={}, "
+                                + "attempt={}, inputs={}, plannedOutput={}",
+                        worldPosition, details.recipeId(), batchId, attempt, job.attemptId,
+                        job.inputs, job.plannedOutput);
+            }
         }
         LOGGER.debug("SPP accepted probability batch at {}: recipe={}, batch={}, attempts={}, activeJobs={}",
                 worldPosition, details.recipeId(), batchId, batchSize, jobs.size());
@@ -830,6 +1088,14 @@ public final class MasterProviderBlockEntity extends AENetworkBlockEntity implem
         return outputs;
     }
 
+    private static List<Integer> consumedInputIndices(ActiveJob job) {
+        List<Integer> result = new ArrayList<>();
+        for (int i = 0; i < job.consumed.length; i++) {
+            if (job.consumed[i]) result.add(i);
+        }
+        return result;
+    }
+
     private boolean canTagInitialWorkpieces(SequencePatternDetails details,
                                              List<List<List<GenericStack>>> attempts) {
         if (level == null) return false;
@@ -862,14 +1128,14 @@ public final class MasterProviderBlockEntity extends AENetworkBlockEntity implem
     }
 
     @Override
-    public void saveAdditional(CompoundTag tag) {
-        super.saveAdditional(tag);
-        tag.put("Patterns", patterns.serializeNBT());
+    public void saveAdditional(CompoundTag tag, HolderLookup.Provider registries) {
+        super.saveAdditional(tag, registries);
+        tag.put("Patterns", patterns.serializeNBT(registries));
         ListTag childList = new ListTag();
         children.forEach(pos -> childList.add(LongTag.valueOf(pos.asLong())));
         tag.put("Children", childList);
         ListTag jobList = new ListTag();
-        jobs.forEach(job -> jobList.add(job.save()));
+        jobs.forEach(job -> jobList.add(job.save(registries)));
         tag.put("Jobs", jobList);
         ListTag remainderList = new ListTag();
         probabilityRemainders.forEach((key, remainder) -> {
@@ -883,12 +1149,12 @@ public final class MasterProviderBlockEntity extends AENetworkBlockEntity implem
     }
 
     @Override
-    public void loadTag(CompoundTag tag) {
-        super.loadTag(tag);
+    public void loadTag(CompoundTag tag, HolderLookup.Provider registries) {
+        super.loadTag(tag, registries);
         if (tag.contains("Patterns")) {
-            patterns.deserializeNBT(tag.getCompound("Patterns"));
+            patterns.deserializeNBT(registries, tag.getCompound("Patterns"));
         } else if (tag.contains("Pattern")) {
-            patterns.setStackInSlot(0, ItemStack.of(tag.getCompound("Pattern")));
+            patterns.setStackInSlot(0, ItemStack.parseOptional(registries, tag.getCompound("Pattern")));
         }
         children.clear();
         nextChildIndexByRoute.clear();
@@ -901,11 +1167,11 @@ public final class MasterProviderBlockEntity extends AENetworkBlockEntity implem
             // Load up to the largest supported configured capacity even if the
             // current setting is lower, so reducing the limit cannot discard jobs.
             for (int i = 0; i < jobList.size() && jobs.size() < MAX_PERSISTED_ACTIVE_JOBS; i++) {
-                ActiveJob loaded = ActiveJob.load(jobList.getCompound(i));
+                ActiveJob loaded = ActiveJob.load(jobList.getCompound(i), registries);
                 if (loaded != null) jobs.add(loaded);
             }
         } else if (tag.contains("Job", Tag.TAG_COMPOUND)) {
-            ActiveJob loaded = ActiveJob.load(tag.getCompound("Job"));
+            ActiveJob loaded = ActiveJob.load(tag.getCompound("Job"), registries);
             if (loaded != null) jobs.add(loaded);
         }
         probabilityRemainders.clear();
@@ -932,6 +1198,8 @@ public final class MasterProviderBlockEntity extends AENetworkBlockEntity implem
         private boolean dispatched;
         private ItemStack workpiece = ItemStack.EMPTY;
         private @Nullable BlockPos lastChildPos;
+        private @Nullable Direction lastOutputSide;
+        private @Nullable FinalOutputDrain finalOutputDrain;
         private @Nullable String unlockToken;
         private boolean resultObserved;
 
@@ -945,7 +1213,7 @@ public final class MasterProviderBlockEntity extends AENetworkBlockEntity implem
             this.plannedOutput = plannedOutput.copy();
         }
 
-        private CompoundTag save() {
+        private CompoundTag save(HolderLookup.Provider registries) {
             CompoundTag tag = new CompoundTag();
             tag.putString("Recipe", recipeId.toString());
             tag.putUUID("AttemptId", attemptId);
@@ -953,18 +1221,19 @@ public final class MasterProviderBlockEntity extends AENetworkBlockEntity implem
             tag.putInt("Step", step);
             tag.putBoolean("Dispatched", dispatched);
             if (lastChildPos != null) tag.putLong("LastChild", lastChildPos.asLong());
+            if (lastOutputSide != null) tag.putString("LastOutputSide", lastOutputSide.getName());
             if (unlockToken != null) tag.putString("UnlockToken", unlockToken);
             tag.putBoolean("ResultObserved", resultObserved);
             tag.putBoolean("PlannedEmpty", plannedOutput.isEmpty());
-            if (!plannedOutput.isEmpty()) tag.put("PlannedOutput", plannedOutput.save(new CompoundTag()));
-            if (!workpiece.isEmpty()) tag.put("Workpiece", workpiece.save(new CompoundTag()));
+            if (!plannedOutput.isEmpty()) tag.put("PlannedOutput", plannedOutput.save(registries));
+            if (!workpiece.isEmpty()) tag.put("Workpiece", workpiece.save(registries));
             ListTag inputList = new ListTag();
             for (int i = 0; i < inputs.size(); i++) {
                 CompoundTag inputTag = new CompoundTag();
                 inputTag.putBoolean("Consumed", consumed[i]);
                 ListTag stacks = new ListTag();
                 for (GenericStack stack : inputs.get(i)) {
-                    CompoundTag stackTag = stack.what().toTagGeneric();
+                    CompoundTag stackTag = stack.what().toTagGeneric(registries);
                     stackTag.putLong("Amount", stack.amount());
                     stacks.add(stackTag);
                 }
@@ -975,7 +1244,7 @@ public final class MasterProviderBlockEntity extends AENetworkBlockEntity implem
             return tag;
         }
 
-        private static @Nullable ActiveJob load(CompoundTag tag) {
+        private static @Nullable ActiveJob load(CompoundTag tag, HolderLookup.Provider registries) {
             ResourceLocation recipe = ResourceLocation.tryParse(tag.getString("Recipe"));
             if (recipe == null) return null;
             ListTag inputList = tag.getList("Inputs", Tag.TAG_COMPOUND);
@@ -988,7 +1257,7 @@ public final class MasterProviderBlockEntity extends AENetworkBlockEntity implem
                 ListTag stacks = inputTag.getList("Stacks", Tag.TAG_COMPOUND);
                 for (int j = 0; j < stacks.size(); j++) {
                     CompoundTag stackTag = stacks.getCompound(j);
-                    AEKey key = AEKey.fromTagGeneric(stackTag);
+                    AEKey key = AEKey.fromTagGeneric(registries, stackTag);
                     if (key != null) selected.add(new GenericStack(key, stackTag.getLong("Amount")));
                 }
                 inputs.add(selected);
@@ -996,14 +1265,16 @@ public final class MasterProviderBlockEntity extends AENetworkBlockEntity implem
             UUID attemptId = tag.hasUUID("AttemptId") ? tag.getUUID("AttemptId") : UUID.randomUUID();
             UUID batchId = tag.hasUUID("BatchId") ? tag.getUUID("BatchId") : attemptId;
             ItemStack plannedOutput = tag.contains("PlannedOutput", Tag.TAG_COMPOUND)
-                    ? ItemStack.of(tag.getCompound("PlannedOutput")) : ItemStack.EMPTY;
+                    ? ItemStack.parseOptional(registries, tag.getCompound("PlannedOutput")) : ItemStack.EMPTY;
             ActiveJob job = new ActiveJob(recipe, inputs, consumed, attemptId, batchId, plannedOutput);
             job.step = tag.getInt("Step");
             job.dispatched = tag.getBoolean("Dispatched");
             job.lastChildPos = tag.contains("LastChild", Tag.TAG_LONG) ? BlockPos.of(tag.getLong("LastChild")) : null;
+            job.lastOutputSide = tag.contains("LastOutputSide", Tag.TAG_STRING)
+                    ? Direction.byName(tag.getString("LastOutputSide")) : null;
             job.unlockToken = tag.contains("UnlockToken", Tag.TAG_STRING) ? tag.getString("UnlockToken") : null;
             job.resultObserved = tag.getBoolean("ResultObserved");
-            job.workpiece = tag.contains("Workpiece") ? ItemStack.of(tag.getCompound("Workpiece")) : ItemStack.EMPTY;
+            job.workpiece = tag.contains("Workpiece") ? ItemStack.parseOptional(registries, tag.getCompound("Workpiece")) : ItemStack.EMPTY;
             return job;
         }
     }

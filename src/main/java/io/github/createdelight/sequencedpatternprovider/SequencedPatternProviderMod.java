@@ -2,38 +2,32 @@ package io.github.createdelight.sequencedpatternprovider;
 
 import appeng.api.crafting.PatternDetailsHelper;
 import appeng.blockentity.AEBaseBlockEntity;
+import io.github.createdelight.sequencedpatternprovider.client.ClientColorRegistration;
 import io.github.createdelight.sequencedpatternprovider.pattern.SequencePatternDecoder;
 import io.github.createdelight.sequencedpatternprovider.part.SequenceEncodingTerminalPart;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.core.registries.Registries;
-import net.minecraft.world.item.Item;
-import net.minecraftforge.eventbus.api.IEventBus;
-import net.minecraftforge.fml.common.Mod;
-import net.minecraftforge.fml.ModLoadingContext;
-import net.minecraftforge.fml.config.ModConfig;
-import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
-import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
-import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
-import net.minecraftforge.common.MinecraftForge;
-import net.minecraftforge.registries.ForgeRegistries;
-import net.minecraftforge.registries.MissingMappingsEvent;
-import appeng.init.client.InitScreens;
-import io.github.createdelight.sequencedpatternprovider.client.SequenceEncodingTerminalScreen;
-import io.github.createdelight.sequencedpatternprovider.client.MasterProviderScreen;
-import io.github.createdelight.sequencedpatternprovider.client.ChildProviderScreen;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.bus.api.IEventBus;
+import net.neoforged.fml.loading.FMLEnvironment;
+import net.neoforged.fml.common.Mod;
+import net.neoforged.fml.ModContainer;
+import net.neoforged.fml.config.ModConfig;
+import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
 
 @Mod(SequencedPatternProviderMod.MOD_ID)
 public final class SequencedPatternProviderMod {
     public static final String MOD_ID = "sequenced_pattern_provider";
-    public SequencedPatternProviderMod() {
-        IEventBus modBus = FMLJavaModLoadingContext.get().getModEventBus();
-        ModLoadingContext.get().registerConfig(ModConfig.Type.SERVER,
+    public SequencedPatternProviderMod(IEventBus modBus, ModContainer container) {
+        container.registerConfig(ModConfig.Type.SERVER,
                 SequencedPatternProviderConfig.SERVER_SPEC);
         SequenceEncodingTerminalPart.registerModels();
         ModRegistry.register(modBus);
+        if (FMLEnvironment.dist == Dist.CLIENT) {
+            ClientColorRegistration.register(modBus);
+        }
         modBus.addListener(this::commonSetup);
-        modBus.addListener(this::clientSetup);
-        MinecraftForge.EVENT_BUS.addListener(this::missingMappings);
+        modBus.addListener(this::registerCapabilities);
+        modBus.addListener(this::registerPartCapabilities);
     }
 
     private void commonSetup(FMLCommonSetupEvent event) {
@@ -44,30 +38,23 @@ public final class SequencedPatternProviderMod {
         });
     }
 
-    private void clientSetup(FMLClientSetupEvent event) {
-        event.enqueueWork(() -> {
-            InitScreens.register(ModRegistry.SEQUENCE_ENCODING_TERMINAL_MENU.get(),
-                    SequenceEncodingTerminalScreen::new, "/screens/sequenced_pattern_provider_terminal.json");
-            InitScreens.register(ModRegistry.MASTER_PROVIDER_MENU.get(),
-                    MasterProviderScreen::new, "/screens/sequenced_pattern_provider_master.json");
-            InitScreens.register(ModRegistry.CHILD_PROVIDER_MENU.get(),
-                    ChildProviderScreen::new, "/screens/sequenced_pattern_provider_child.json");
-        });
+    private void registerCapabilities(net.neoforged.neoforge.capabilities.RegisterCapabilitiesEvent event) {
+        event.registerBlockEntity(appeng.api.AECapabilities.IN_WORLD_GRID_NODE_HOST,
+                ModRegistry.MASTER_PROVIDER_BE.get(), (be, side) -> be);
+        event.registerBlockEntity(appeng.api.AECapabilities.IN_WORLD_GRID_NODE_HOST,
+                ModRegistry.CHILD_PROVIDER_BE.get(), (be, side) -> be);
+        event.registerBlockEntity(net.neoforged.neoforge.capabilities.Capabilities.ItemHandler.BLOCK,
+                ModRegistry.CHILD_PROVIDER_BE.get(), (be, side) -> be.inboundItemHandler());
+        event.registerBlockEntity(net.neoforged.neoforge.capabilities.Capabilities.FluidHandler.BLOCK,
+                ModRegistry.CHILD_PROVIDER_BE.get(), (be, side) -> be.inboundFluidHandler());
     }
 
-    private void missingMappings(MissingMappingsEvent event) {
-        Item aeGuide = ForgeRegistries.ITEMS.getValue(new ResourceLocation("ae2", "guide"));
-        Item aeMemoryCard = ForgeRegistries.ITEMS.getValue(new ResourceLocation("ae2", "memory_card"));
-        for (var mapping : event.getMappings(Registries.ITEM, MOD_ID)) {
-            if (mapping.getKey().getPath().equals("guide") && aeGuide != null) {
-                mapping.remap(aeGuide);
-            } else if (mapping.getKey().getPath().equals("provider_link") && aeMemoryCard != null) {
-                mapping.remap(aeMemoryCard);
-            }
-        }
+    private void registerPartCapabilities(appeng.api.parts.RegisterPartCapabilitiesEvent event) {
+        event.register(net.neoforged.neoforge.capabilities.Capabilities.ItemHandler.BLOCK,
+                (part, side) -> part.getPatternInventory().toItemHandler(), SequenceEncodingTerminalPart.class);
     }
 
     public static ResourceLocation id(String path) {
-        return new ResourceLocation(MOD_ID, path);
+        return ResourceLocation.fromNamespaceAndPath(MOD_ID, path);
     }
 }

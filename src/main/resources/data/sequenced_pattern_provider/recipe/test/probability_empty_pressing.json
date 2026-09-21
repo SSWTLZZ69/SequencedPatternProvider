@@ -1,17 +1,17 @@
 {
   "type": "create:sequenced_assembly",
   "ingredient": {
-    "item": "minecraft:structure_void"
+    "item": "minecraft:barrier"
   },
-  "loops": 3,
+  "loops": 1,
   "results": [
     {
-      "chance": 80.0,
-      "item": "minecraft:diamond"
+      "chance": 1.0,
+      "id": "minecraft:nether_star"
     },
     {
-      "chance": 20.0,
-      "item": "minecraft:flint"
+      "chance": 1.0,
+      "id": "minecraft:air"
     }
   ],
   "sequence": [
@@ -24,12 +24,12 @@
       ],
       "results": [
         {
-          "item": "create:incomplete_precision_mechanism"
+          "id": "create:incomplete_precision_mechanism"
         }
       ]
     }
   ],
-  "transitionalItem": {
-    "item": "create:incomplete_precision_mechanism"
+  "transitional_item": {
+    "id": "create:incomplete_precision_mechanism"
   }
 }

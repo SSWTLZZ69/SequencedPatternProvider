@@ -6,11 +6,10 @@ import appeng.api.stacks.AEItemKey;
 import appeng.api.stacks.AEKey;
 import appeng.api.stacks.GenericStack;
 import com.simibubi.create.content.processing.recipe.ProcessingOutput;
-import com.simibubi.create.content.processing.recipe.ProcessingRecipe;
 import com.simibubi.create.content.processing.sequenced.IAssemblyRecipe;
 import com.simibubi.create.content.processing.sequenced.SequencedAssemblyRecipe;
 import com.simibubi.create.content.processing.sequenced.SequencedRecipe;
-import com.simibubi.create.foundation.fluid.FluidIngredient;
+import net.neoforged.neoforge.fluids.crafting.SizedFluidIngredient;
 import io.github.createdelight.sequencedpatternprovider.SequencedPatternProviderConfig;
 import io.github.createdelight.sequencedpatternprovider.item.SequencePatternItem;
 import io.github.createdelight.sequencedpatternprovider.probability.ProbabilityPlan;
@@ -22,7 +21,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
-import net.minecraftforge.fluids.FluidStack;
+import net.neoforged.neoforge.fluids.FluidStack;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
@@ -93,11 +92,11 @@ public final class SequencePatternDetails implements IPatternDetails {
     public static @Nullable SequencePatternDetails fromStack(ItemStack patternStack, Level level) {
         ResourceLocation recipeId = SequencePatternItem.getRecipeId(patternStack);
         if (recipeId == null) return null;
-        Recipe<?> found = level.getRecipeManager().byKey(recipeId).orElse(null);
+        Recipe<?> found = level.getRecipeManager().byKey(recipeId).map(net.minecraft.world.item.crafting.RecipeHolder::value).orElse(null);
         if (!(found instanceof SequencedAssemblyRecipe recipe)) return null;
         if (recipe.getSequence().isEmpty() || recipe.getLoops() < 1 || recipe.resultPool.isEmpty()) return null;
 
-        SequencePatternItem.ManualDefinition manual = SequencePatternItem.getManualDefinition(patternStack);
+        SequencePatternItem.ManualDefinition manual = SequencePatternItem.getManualDefinition(patternStack, level.registryAccess());
         if (manual != null) return fromManual(patternStack, recipeId, recipe, manual);
 
         ProcessingOutput result = recipe.resultPool.get(0);
@@ -123,9 +122,9 @@ public final class SequencePatternDetails implements IPatternDetails {
                 inputs.add(input);
             }
 
-            List<FluidIngredient> fluidIngredients = new ArrayList<>();
+            List<SizedFluidIngredient> fluidIngredients = new ArrayList<>();
             assembly.addAssemblyFluidIngredients(fluidIngredients);
-            for (FluidIngredient ingredient : fluidIngredients) {
+            for (SizedFluidIngredient ingredient : fluidIngredients) {
                 PlannedInput input = fluidInput(step, ingredient, probabilityPlan.batchSize());
                 if (input == null) return null;
                 inputs.add(input);
@@ -198,16 +197,16 @@ public final class SequencePatternDetails implements IPatternDetails {
                 key -> key instanceof AEItemKey itemKey && itemKey.matches(ingredient));
     }
 
-    private static @Nullable PlannedInput fluidInput(int step, FluidIngredient ingredient, int batchSize) {
-        List<FluidStack> stacks = ingredient.getMatchingFluidStacks();
+    private static @Nullable PlannedInput fluidInput(int step, SizedFluidIngredient ingredient, int batchSize) {
+        List<FluidStack> stacks = Arrays.asList(ingredient.getFluids());
         if (stacks.isEmpty()) return null;
         GenericStack[] choices = stacks.stream()
                 .filter(stack -> !stack.isEmpty())
-                .map(stack -> new GenericStack(AEFluidKey.of(stack), ingredient.getRequiredAmount()))
+                .map(stack -> new GenericStack(AEFluidKey.of(stack), ingredient.amount()))
                 .toArray(GenericStack[]::new);
         if (choices.length == 0) return null;
         return new PlannedInput(step, choices, 1, batchSize,
-                key -> key instanceof AEFluidKey fluidKey && ingredient.test(fluidKey.toStack(ingredient.getRequiredAmount())));
+                key -> key instanceof AEFluidKey fluidKey && ingredient.test(fluidKey.toStack(ingredient.amount())));
     }
 
     @Override
@@ -221,8 +220,8 @@ public final class SequencePatternDetails implements IPatternDetails {
     }
 
     @Override
-    public GenericStack[] getOutputs() {
-        return outputs;
+    public List<GenericStack> getOutputs() {
+        return List.of(outputs);
     }
 
     @Override

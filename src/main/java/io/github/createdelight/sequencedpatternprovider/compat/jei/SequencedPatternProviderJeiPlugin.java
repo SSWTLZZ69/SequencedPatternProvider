@@ -15,6 +15,7 @@ import mezz.jei.api.registration.IRecipeTransferRegistration;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.crafting.RecipeHolder;
 import net.minecraft.world.inventory.MenuType;
 import org.jetbrains.annotations.Nullable;
 
@@ -23,8 +24,11 @@ import java.util.Optional;
 @JeiPlugin
 public final class SequencedPatternProviderJeiPlugin implements IModPlugin {
     private static final ResourceLocation UID = SequencedPatternProviderMod.id("jei_plugin");
-    private static final RecipeType<SequencedAssemblyRecipe> SEQUENCED_ASSEMBLY = RecipeType.create(
-            "create", "sequenced_assembly", SequencedAssemblyRecipe.class);
+    // JEI discovers plugins before NeoForge has finished binding Create's deferred recipe types.
+    // Use the category id directly so loading this class never dereferences an unbound holder.
+    private static final RecipeType<RecipeHolder<SequencedAssemblyRecipe>> SEQUENCED_ASSEMBLY =
+            RecipeType.createRecipeHolderType(ResourceLocation.fromNamespaceAndPath(
+                    "create", "sequenced_assembly"));
 
     @Override
     public ResourceLocation getPluginUid() {
@@ -38,7 +42,7 @@ public final class SequencedPatternProviderJeiPlugin implements IModPlugin {
     }
 
     private record TransferHandler(IRecipeTransferHandlerHelper helper)
-            implements IRecipeTransferHandler<SequenceEncodingTerminalMenu, SequencedAssemblyRecipe> {
+            implements IRecipeTransferHandler<SequenceEncodingTerminalMenu, RecipeHolder<SequencedAssemblyRecipe>> {
         @Override
         public Class<? extends SequenceEncodingTerminalMenu> getContainerClass() {
             return SequenceEncodingTerminalMenu.class;
@@ -52,21 +56,21 @@ public final class SequencedPatternProviderJeiPlugin implements IModPlugin {
         }
 
         @Override
-        public RecipeType<SequencedAssemblyRecipe> getRecipeType() {
+        public RecipeType<RecipeHolder<SequencedAssemblyRecipe>> getRecipeType() {
             return SEQUENCED_ASSEMBLY;
         }
 
         @Override
         public @Nullable IRecipeTransferError transferRecipe(SequenceEncodingTerminalMenu menu,
-                                                              SequencedAssemblyRecipe recipe,
+                                                              RecipeHolder<SequencedAssemblyRecipe> recipe,
                                                               IRecipeSlotsView recipeSlots,
                                                               Player player, boolean maxTransfer,
                                                               boolean doTransfer) {
-            SequenceRecipeTransferData.ParseResult parsed = SequenceRecipeTransferData.parse(recipe);
+            SequenceRecipeTransferData.ParseResult parsed = SequenceRecipeTransferData.parse(recipe.value());
             if (!parsed.successful()) {
                 return helper.createUserErrorWithTooltip(Component.translatable(parsed.errorKey()));
             }
-            if (doTransfer) menu.fillFromRecipe(recipe.getId());
+            if (doTransfer) menu.fillFromRecipe(recipe.id());
             return null;
         }
     }

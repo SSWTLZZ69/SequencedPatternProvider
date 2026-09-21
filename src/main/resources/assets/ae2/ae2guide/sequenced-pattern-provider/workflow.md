@@ -21,6 +21,18 @@ If the count does not increase, make sure Shift is released when using the card 
 
 The card keeps the saved master so several children can be linked in succession. Shift-right-click the air to clear the card. Use **Clear Links** in the master to remove all children linked to that master.
 
+The same child may be linked to more than one master. Record each master in turn and normally right-click the shared child with that master's card. All participating masters and the shared child must remain on the same AE network; the child is one shared processing line, including its buffer and crafting lock.
+
+## Copying a Master's Child Links
+
+When adding another master with the same production lines, you do not need to link every child again:
+
+1. Hold a memory card and **shift-right-click the old master**.
+2. Release Shift and **normally right-click the new master**.
+3. The new master merges the saved child links. Existing links are kept; patterns, jobs, buffers and locks are not copied.
+
+The card still retains the old master's link profile, so it can also be used to normally right-click individual children. Re-record the new master on the card when you want to add more children to the new master one by one. Links from unloaded chunks are deferred and validated when the chunk is loaded.
+
 ## The Result Is Not Craftable
 
 Check these points:

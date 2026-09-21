@@ -24,6 +24,8 @@ You need three things:
 5. Release Shift and **normally right-click each child provider** with the same card. The master's connected-child count increases after every successful link.
 6. Put the pattern in the master and request the final item from AE.
 
+To add another nine-pattern master for the same production lines, shift-right-click the existing master with a memory card, then normally right-click the new master to copy its child-link set.
+
 Do not shift-right-click a child while linking. Shift-right-clicking a child saves its settings for copying; it does not link the child to the master.
 
 See [Setup and Troubleshooting](workflow.md) if the item cannot be ordered or a job stops.

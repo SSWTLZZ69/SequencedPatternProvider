@@ -1,7 +1,7 @@
 {
   "parent": "ae2:item/display_base",
   "textures": {
-    "front": "sequenced_pattern_provider:part/sequence_encoding_terminal",
+    "front_base": "ae2:part/monitor_front",
     "front_bright": "sequenced_pattern_provider:part/sequence_encoding_terminal_bright",
     "front_medium": "sequenced_pattern_provider:part/sequence_encoding_terminal_medium",
     "front_dark": "sequenced_pattern_provider:part/sequence_encoding_terminal_dark"

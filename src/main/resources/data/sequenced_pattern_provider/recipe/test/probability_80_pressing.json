@@ -1,17 +1,17 @@
 {
   "type": "create:sequenced_assembly",
   "ingredient": {
-    "item": "minecraft:jigsaw"
+    "item": "minecraft:structure_void"
   },
-  "loops": 2,
+  "loops": 3,
   "results": [
     {
-      "chance": 18.2634,
-      "item": "minecraft:emerald"
+      "chance": 80.0,
+      "id": "minecraft:diamond"
     },
     {
-      "chance": 81.7366,
-      "item": "minecraft:coal"
+      "chance": 20.0,
+      "id": "minecraft:flint"
     }
   ],
   "sequence": [
@@ -24,12 +24,12 @@
       ],
       "results": [
         {
-          "item": "create:incomplete_precision_mechanism"
+          "id": "create:incomplete_precision_mechanism"
         }
       ]
     }
   ],
-  "transitionalItem": {
-    "item": "create:incomplete_precision_mechanism"
+  "transitional_item": {
+    "id": "create:incomplete_precision_mechanism"
   }
 }

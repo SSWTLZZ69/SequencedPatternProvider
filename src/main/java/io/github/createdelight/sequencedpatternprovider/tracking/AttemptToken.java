@@ -1,6 +1,8 @@
 package io.github.createdelight.sequencedpatternprovider.tracking;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.world.item.component.CustomData;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.resources.ResourceLocation;
@@ -22,8 +24,12 @@ public final class AttemptToken {
     private AttemptToken() {
     }
 
+    private static CompoundTag data(ItemStack stack) {
+        return stack.getOrDefault(DataComponents.CUSTOM_DATA, CustomData.EMPTY).copyTag();
+    }
+
     public static void write(ItemStack stack, ResourceLocation dimension, BlockPos masterPos, UUID attemptId) {
-        write(stack.getOrCreateTag(), dimension, masterPos, attemptId);
+        CustomData.update(DataComponents.CUSTOM_DATA, stack, root -> write(root, dimension, masterPos, attemptId));
     }
 
     static void write(CompoundTag root, ResourceLocation dimension, BlockPos masterPos, UUID attemptId) {
@@ -35,8 +41,8 @@ public final class AttemptToken {
     }
 
     public static void copy(ItemStack input, ItemStack output) {
-        CompoundTag token = findToken(input.getTag());
-        if (token != null) writeToken(output.getOrCreateTag(), token);
+        CompoundTag token = findToken(data(input));
+        if (token != null) CustomData.update(DataComponents.CUSTOM_DATA, output, root -> writeToken(root, token));
     }
 
     static void copy(@Nullable CompoundTag inputRoot, CompoundTag outputRoot) {
@@ -45,7 +51,7 @@ public final class AttemptToken {
     }
 
     public static boolean has(ItemStack stack) {
-        return has(stack.getTag());
+        return has(data(stack));
     }
 
     static boolean has(@Nullable CompoundTag root) {
@@ -53,7 +59,7 @@ public final class AttemptToken {
     }
 
     public static @Nullable Address read(ItemStack stack) {
-        return read(stack.getTag());
+        return read(data(stack));
     }
 
     static @Nullable Address read(@Nullable CompoundTag root) {
@@ -65,10 +71,11 @@ public final class AttemptToken {
     }
 
     public static void clear(ItemStack stack) {
-        CompoundTag tag = stack.getTag();
+        CompoundTag tag = data(stack);
         if (tag == null) return;
         clear(tag);
-        if (tag.isEmpty()) stack.setTag(null);
+        if (tag.isEmpty()) stack.remove(DataComponents.CUSTOM_DATA);
+        else stack.set(DataComponents.CUSTOM_DATA, CustomData.of(tag));
     }
 
     static void clear(CompoundTag root) {

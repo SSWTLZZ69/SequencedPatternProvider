@@ -19,7 +19,7 @@ public final class SequencePatternDecoder implements IPatternDetailsDecoder {
     }
 
     @Override
-    public IPatternDetails decodePattern(ItemStack stack, Level level, boolean tryRecovery) {
+    public IPatternDetails decodePattern(ItemStack stack, Level level) {
         return SequencePatternDetails.fromStack(stack, level);
     }
 }

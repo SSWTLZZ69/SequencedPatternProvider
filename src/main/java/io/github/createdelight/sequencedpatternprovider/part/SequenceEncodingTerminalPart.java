@@ -4,7 +4,6 @@ import appeng.api.parts.IPartItem;
 import appeng.api.parts.IPartModel;
 import appeng.api.parts.PartModels;
 import appeng.api.stacks.AEItemKey;
-import appeng.api.util.AECableType;
 import appeng.parts.PartModel;
 import appeng.parts.encoding.PatternEncodingTerminalPart;
 import appeng.core.definitions.AEItems;
@@ -16,18 +15,14 @@ import io.github.createdelight.sequencedpatternprovider.SequencedPatternProvider
 import io.github.createdelight.sequencedpatternprovider.item.SequencePatternItem;
 import io.github.createdelight.sequencedpatternprovider.menu.SequenceEncodingTerminalMenu;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.core.HolderLookup;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.InteractionHand;
 import net.minecraft.world.SimpleMenuProvider;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.MenuType;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.Vec3;
-import net.minecraftforge.common.capabilities.Capability;
-import net.minecraftforge.common.capabilities.ForgeCapabilities;
-import net.minecraftforge.common.util.LazyOptional;
-import net.minecraftforge.network.NetworkHooks;
 
 import java.util.List;
 import org.jetbrains.annotations.Nullable;
@@ -44,19 +39,19 @@ public final class SequenceEncodingTerminalPart extends PatternEncodingTerminalP
     private static final IPartModel MODELS_HAS_CHANNEL = new PartModel(
             MODEL_BASE, MODEL_ON, MODEL_STATUS_HAS_CHANNEL);
 
-    private final ConfigInventory materials = ConfigInventory.configStacks(null,
-            SequencePatternItem.MAX_MANUAL_STEPS, this::onConfigurationChanged, true);
-    private final ConfigInventory routes = ConfigInventory.configTypes(key -> key instanceof AEItemKey,
-            SequencePatternItem.MAX_MANUAL_STEPS, this::onConfigurationChanged);
-    private final ConfigInventory initialInput = ConfigInventory.configStacks(key -> key instanceof AEItemKey,
-            1, this::onConfigurationChanged, true);
-    private final ConfigInventory finalOutput = ConfigInventory.configStacks(key -> key instanceof AEItemKey,
-            1, this::onConfigurationChanged, true);
+    private final ConfigInventory materials = ConfigInventory.configStacks(SequencePatternItem.MAX_MANUAL_STEPS)
+            .changeListener(this::onConfigurationChanged).allowOverstacking(true).build();
+    private final ConfigInventory routes = ConfigInventory.configTypes(SequencePatternItem.MAX_MANUAL_STEPS)
+            .slotFilter(key -> key instanceof AEItemKey).changeListener(this::onConfigurationChanged).build();
+    private final ConfigInventory initialInput = ConfigInventory.configStacks(1)
+            .slotFilter(key -> key instanceof AEItemKey).changeListener(this::onConfigurationChanged).allowOverstacking(true).build();
+    private final ConfigInventory finalOutput = ConfigInventory.configStacks(1)
+            .slotFilter(key -> key instanceof AEItemKey).changeListener(this::onConfigurationChanged).allowOverstacking(true).build();
     private final AppEngInternalInventory patternInventory = new AppEngInternalInventory(this, 2, 64,
             new IAEItemFilter() {
                 @Override
                 public boolean allowInsert(appeng.api.inventories.InternalInventory inv, int slot, ItemStack stack) {
-                    return slot == 0 ? AEItems.BLANK_PATTERN.isSameAs(stack)
+                    return slot == 0 ? AEItems.BLANK_PATTERN.is(stack)
                             : slot == 1 && SequencePatternItem.isEncoded(stack);
                 }
             });
@@ -126,9 +121,9 @@ public final class SequenceEncodingTerminalPart extends PatternEncodingTerminalP
     }
 
     @Override
-    public boolean onPartActivate(Player player, InteractionHand hand, Vec3 pos) {
+    public boolean onUseWithoutItem(Player player, Vec3 pos) {
         if (!player.level().isClientSide && player instanceof ServerPlayer serverPlayer && isActive()) {
-            NetworkHooks.openScreen(serverPlayer,
+            serverPlayer.openMenu(
                     new SimpleMenuProvider((id, inventory, ignored) ->
                             new SequenceEncodingTerminalMenu(id, inventory, this),
                             getName()),
@@ -159,34 +154,27 @@ public final class SequenceEncodingTerminalPart extends PatternEncodingTerminalP
     }
 
     @Override
-    public void readFromNBT(CompoundTag data) {
-        super.readFromNBT(data);
-        materials.readFromChildTag(data, "SequenceMaterials");
-        routes.readFromChildTag(data, "SequenceRoutes");
-        initialInput.readFromChildTag(data, "SequenceInitial");
-        finalOutput.readFromChildTag(data, "SequenceOutput");
-        patternInventory.readFromNBT(data, "SequencePatterns");
+    public void readFromNBT(CompoundTag data, HolderLookup.Provider registries) {
+        super.readFromNBT(data, registries);
+        materials.readFromChildTag(data, "SequenceMaterials", registries);
+        routes.readFromChildTag(data, "SequenceRoutes", registries);
+        initialInput.readFromChildTag(data, "SequenceInitial", registries);
+        finalOutput.readFromChildTag(data, "SequenceOutput", registries);
+        patternInventory.readFromNBT(data, "SequencePatterns", registries);
         loops = Math.max(1, data.getInt("SequenceLoops"));
         selectedRecipeId = ResourceLocation.tryParse(data.getString("SequenceSelectedRecipe"));
     }
 
     @Override
-    public void writeToNBT(CompoundTag data) {
-        super.writeToNBT(data);
-        materials.writeToChildTag(data, "SequenceMaterials");
-        routes.writeToChildTag(data, "SequenceRoutes");
-        initialInput.writeToChildTag(data, "SequenceInitial");
-        finalOutput.writeToChildTag(data, "SequenceOutput");
-        patternInventory.writeToNBT(data, "SequencePatterns");
+    public void writeToNBT(CompoundTag data, HolderLookup.Provider registries) {
+        super.writeToNBT(data, registries);
+        materials.writeToChildTag(data, "SequenceMaterials", registries);
+        routes.writeToChildTag(data, "SequenceRoutes", registries);
+        initialInput.writeToChildTag(data, "SequenceInitial", registries);
+        finalOutput.writeToChildTag(data, "SequenceOutput", registries);
+        patternInventory.writeToNBT(data, "SequencePatterns", registries);
         data.putInt("SequenceLoops", loops);
         if (selectedRecipeId != null) data.putString("SequenceSelectedRecipe", selectedRecipeId.toString());
     }
 
-    @Override
-    public <T> LazyOptional<T> getCapability(Capability<T> cap) {
-        if (cap == ForgeCapabilities.ITEM_HANDLER) {
-            return LazyOptional.of(patternInventory::toItemHandler).cast();
-        }
-        return super.getCapability(cap);
-    }
 }

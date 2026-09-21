@@ -3,35 +3,30 @@ package io.github.createdelight.sequencedpatternprovider.client;
 import appeng.client.gui.AEBaseScreen;
 import appeng.client.gui.Icon;
 import appeng.client.gui.style.ScreenStyle;
+import appeng.client.gui.widgets.AE2Button;
 import io.github.createdelight.sequencedpatternprovider.menu.MasterProviderMenu;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.Slot;
 
 public final class MasterProviderScreen extends AEBaseScreen<MasterProviderMenu> {
-    private final Button abortButton;
-    private final Button clearChildrenButton;
+    private final AE2Button abortButton;
+    private final AE2Button clearChildrenButton;
 
     public MasterProviderScreen(MasterProviderMenu menu, Inventory inventory,
                                 Component title, ScreenStyle style) {
         super(menu, inventory, title, style);
-        abortButton = Button.builder(Component.translatable(
-                        "gui.sequenced_pattern_provider.master.abort"), button -> menu.abortJob())
-                .bounds(0, 0, 72, 18)
-                .build();
+        abortButton = new AE2Button(0, 0, 72, 18, Component.translatable(
+                "gui.sequenced_pattern_provider.master.abort"), button -> menu.abortJob());
         abortButton.setTooltip(Tooltip.create(Component.translatable(
                 "tooltip.sequenced_pattern_provider.master.abort")));
         widgets.add("abortJob", abortButton);
 
-        clearChildrenButton = Button.builder(Component.translatable(
-                        "gui.sequenced_pattern_provider.master.clear_children"),
-                button -> menu.clearChildren())
-                .bounds(0, 0, 88, 18)
-                .build();
+        clearChildrenButton = new AE2Button(0, 0, 88, 18, Component.translatable(
+                "gui.sequenced_pattern_provider.master.clear_children"), button -> menu.clearChildren());
         clearChildrenButton.setTooltip(Tooltip.create(Component.translatable(
                 "tooltip.sequenced_pattern_provider.master.clear_children")));
         widgets.add("clearChildren", clearChildrenButton);

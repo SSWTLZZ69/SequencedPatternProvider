@@ -4,19 +4,21 @@ import appeng.api.config.Settings;
 import appeng.api.config.LockCraftingMode;
 import appeng.api.config.YesNo;
 import appeng.client.gui.AEBaseScreen;
+import appeng.client.gui.Icon;
 import appeng.client.gui.style.ScreenStyle;
+import appeng.client.gui.widgets.AE2Button;
 import appeng.client.gui.widgets.SettingToggleButton;
 import io.github.createdelight.sequencedpatternprovider.menu.ChildProviderMenu;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.inventory.Slot;
 
 public final class ChildProviderScreen extends AEBaseScreen<ChildProviderMenu> {
     private final SettingToggleButton<YesNo> blockingModeButton;
     private final SettingToggleButton<LockCraftingMode> lockCraftingModeButton;
-    private final Button clearMachinesButton;
+    private final AE2Button clearMachinesButton;
 
     public ChildProviderScreen(ChildProviderMenu menu, Inventory inventory,
                                Component title, ScreenStyle style) {
@@ -30,10 +32,8 @@ public final class ChildProviderScreen extends AEBaseScreen<ChildProviderMenu> {
                 (button, rightClick) -> menu.cycleLockCraftingMode(rightClick));
         addToLeftToolbar(lockCraftingModeButton);
 
-        clearMachinesButton = Button.builder(Component.translatable(
-                        "gui.sequenced_pattern_provider.child.clear"), button -> menu.clearSupportedMachines())
-                .bounds(0, 0, 48, 18)
-                .build();
+        clearMachinesButton = new AE2Button(0, 0, 48, 18, Component.translatable(
+                "gui.sequenced_pattern_provider.child.clear"), button -> menu.clearSupportedMachines());
         clearMachinesButton.setTooltip(Tooltip.create(Component.translatable(
                 "tooltip.sequenced_pattern_provider.child.clear")));
         widgets.add("clearMachines", clearMachinesButton);
@@ -45,6 +45,19 @@ public final class ChildProviderScreen extends AEBaseScreen<ChildProviderMenu> {
         blockingModeButton.set(menu.blockingMode ? YesNo.YES : YesNo.NO);
         lockCraftingModeButton.set(menu.lockCraftingMode);
         clearMachinesButton.active = menu.supportedMachineCount > 0;
+    }
+
+    @Override
+    public void drawBG(GuiGraphics graphics, int offsetX, int offsetY,
+                       int mouseX, int mouseY, float partialTicks) {
+        super.drawBG(graphics, offsetX, offsetY, mouseX, mouseY, partialTicks);
+        // Use the current AE2 slot sprite at the actual item coordinates;
+        // do not rely on slot wells baked into a legacy background texture.
+        for (Slot slot : menu.slots) {
+            Icon.SLOT_BACKGROUND.getBlitter()
+                    .dest(offsetX + slot.x - 1, offsetY + slot.y - 1)
+                    .blit(graphics);
+        }
     }
 
     @Override

@@ -111,7 +111,7 @@ public final class ProbabilityPlan {
 
     private static boolean sameResult(ItemStack recipeOutput, ItemStack selectedOutput) {
         return recipeOutput.getCount() == selectedOutput.getCount()
-                && ItemStack.isSameItemSameTags(recipeOutput, selectedOutput);
+                && ItemStack.isSameItemSameComponents(recipeOutput, selectedOutput);
     }
 
     private static int chooseBatchSize(long numerator, long denominator, int maxBatchSize) {

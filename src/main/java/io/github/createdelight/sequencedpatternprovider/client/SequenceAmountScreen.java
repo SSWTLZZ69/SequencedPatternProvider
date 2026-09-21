@@ -57,7 +57,7 @@ final class SequenceAmountScreen extends Screen {
 
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
-        renderBackground(graphics);
+        renderBackground(graphics, mouseX, mouseY, partialTick);
         graphics.drawCenteredString(font, title, width / 2, height / 2 - 42, 0xFFFFFF);
         graphics.drawCenteredString(font, current.what().getDisplayName(), width / 2, height / 2 - 28, 0xDDDDDD);
         super.render(graphics, mouseX, mouseY, partialTick);
