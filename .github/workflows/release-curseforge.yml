@@ -7,9 +7,9 @@ on:
         description: 'Mod version (e.g. 0.3.2)'
         required: true
       game_versions:
-        description: 'CurseForge gameVersions, comma-separated'
+        description: 'CurseForge gameVersion IDs, comma-separated'
         required: true
-        default: '1.21.1,NeoForge,Client,Server'
+        default: '11779,10150,9638,9639'
       release_type:
         description: 'CurseForge release type'
         required: true
@@ -75,7 +75,7 @@ jobs:
           project = os.environ['CF_PROJECT_ID']
           jar = os.environ['JAR_PATH']
           jarname = os.environ['JAR_NAME']
-          gvs = [v.strip() for v in os.environ['GAME_VERSIONS'].split(',')]
+          gvs = [int(v.strip()) for v in os.environ['GAME_VERSIONS'].split(',')]
           rtype = os.environ['RELEASE_TYPE']
           ver = os.environ['VERSION']
 
@@ -116,10 +116,10 @@ jobs:
           body = b"".join(parts)
 
           req = urllib.request.Request(
-              f"https://api.curseforge.com/v1/mods/{project}/files",
+              f"https://minecraft.curseforge.com/api/projects/{project}/upload-file",
               data=body,
               headers={
-                  "x-api-key": token,
+                  "X-Api-Token": token,
                   "Content-Type": f"multipart/form-data; boundary={boundary}",
               },
               method="POST",
