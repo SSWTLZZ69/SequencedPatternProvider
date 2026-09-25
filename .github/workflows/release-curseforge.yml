@@ -1,0 +1,149 @@
+name: Release to CurseForge
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Mod version (e.g. 0.3.2)'
+        required: true
+      game_versions:
+        description: 'CurseForge gameVersions, comma-separated'
+        required: true
+        default: '1.21.1,NeoForge,Client,Server'
+      release_type:
+        description: 'CurseForge release type'
+        required: true
+        default: 'release'
+        type: choice
+        options: [release, beta, alpha]
+      build_branch:
+        description: 'Branch/ref to build'
+        required: true
+        default: 'neoforge-1.21.1'
+      create_github_release:
+        description: 'Also create a GitHub Release with the jar'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.build_branch }}
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build jar
+        run: ./gradlew build -x test --console=plain
+        env:
+          # tests need a full game env; skip for release packaging
+          CI: 'true'
+
+      - name: Locate jar
+        id: jar
+        run: |
+          JAR=$(ls build/libs/sequenced_pattern_provider-*-${{ inputs.version }}.jar | head -1)
+          echo "path=$JAR" >> "$GITHUB_OUTPUT"
+          echo "name=$(basename "$JAR")" >> "$GITHUB_OUTPUT"
+
+      - name: Upload to CurseForge
+        env:
+          CF_TOKEN: ${{ secrets.CURSEFORGE_TOKEN }}
+          CF_PROJECT_ID: '1607551'
+          JAR_PATH: ${{ steps.jar.outputs.path }}
+          JAR_NAME: ${{ steps.jar.outputs.name }}
+          GAME_VERSIONS: ${{ inputs.game_versions }}
+          RELEASE_TYPE: ${{ inputs.release_type }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          python3 - <<'PYEOF'
+          import json, os, urllib.request, uuid
+
+          token = os.environ['CF_TOKEN']
+          project = os.environ['CF_PROJECT_ID']
+          jar = os.environ['JAR_PATH']
+          jarname = os.environ['JAR_NAME']
+          gvs = [v.strip() for v in os.environ['GAME_VERSIONS'].split(',')]
+          rtype = os.environ['RELEASE_TYPE']
+          ver = os.environ['VERSION']
+
+          changelog = (
+              "- Ported to NeoForge 21.1.228 / Minecraft 1.21.1\n"
+              "- Data paths migrated to 1.21 format (loot_table/, recipe/, data component tags)\n"
+              "- New repainted provider block textures\n"
+              "- Terminal UI updated for new AE2 screen schema\n"
+              "- Jade integration added\n\n"
+              "- 迁移至 NeoForge 21.1.228 / Minecraft 1.21.1\n"
+              "- 数据路径迁移至 1.21 格式\n"
+              "- 更新主控/子供应器新贴图\n"
+              "- 终端界面适配新版 AE2 屏幕格式\n"
+              "- 新增 Jade 集成"
+          )
+
+          metadata = {
+              "changelog": changelog,
+              "changelogType": "markdown",
+              "displayName": f"Sequenced Pattern Provider {ver}",
+              "gameVersions": gvs,
+              "releaseType": rtype,
+          }
+
+          boundary = uuid.uuid4().hex
+          CRLF = b"\r\n"
+          parts = []
+          parts.append(b"--" + boundary.encode() + CRLF)
+          parts.append(b'Content-Disposition: form-data; name="metadata"' + CRLF + CRLF)
+          parts.append(json.dumps(metadata).encode() + CRLF)
+          parts.append(b"--" + boundary.encode() + CRLF)
+          parts.append(
+              b'Content-Disposition: form-data; name="file"; filename="'
+              + jarname.encode() + b'"' + CRLF)
+          parts.append(b"Content-Type: application/java-archive" + CRLF + CRLF)
+          parts.append(open(jar, "rb").read() + CRLF)
+          parts.append(b"--" + boundary.encode() + b"--" + CRLF)
+          body = b"".join(parts)
+
+          req = urllib.request.Request(
+              f"https://api.curseforge.com/v1/mods/{project}/files",
+              data=body,
+              headers={
+                  "x-api-key": token,
+                  "Content-Type": f"multipart/form-data; boundary={boundary}",
+              },
+              method="POST",
+          )
+          try:
+              with urllib.request.urlopen(req, timeout=180) as resp:
+                  data = json.loads(resp.read())
+                  print(f"UPLOAD OK fileId={data.get('id')} fileName={data.get('fileName')}")
+          except urllib.error.HTTPError as e:
+              print(f"UPLOAD FAIL {e.code}: {e.read().decode('utf-8', 'replace')}")
+              raise SystemExit(1)
+          PYEOF
+
+      - name: Upload jar artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.jar.outputs.name }}
+          path: ${{ steps.jar.outputs.path }}
+
+      - name: Create GitHub Release
+        if: ${{ inputs.create_github_release }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ inputs.version }}-${{ inputs.build_branch }}
+          name: v${{ inputs.version }} (${{ inputs.build_branch }})
+          files: ${{ steps.jar.outputs.path }}
+          generate_release_notes: true
