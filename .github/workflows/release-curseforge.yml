@@ -46,7 +46,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Build jar
-        run: ./gradlew build -x test --console=plain
+        run: bash ./gradlew build -x test --console=plain
         env:
           # tests need a full game env; skip for release packaging
           CI: 'true'
