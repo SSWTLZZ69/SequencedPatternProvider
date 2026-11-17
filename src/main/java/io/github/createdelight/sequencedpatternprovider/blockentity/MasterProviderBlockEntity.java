@@ -22,6 +22,7 @@ import io.github.createdelight.sequencedpatternprovider.pattern.AssemblyStepDesc
 import io.github.createdelight.sequencedpatternprovider.pattern.SequencePatternDetails;
 import io.github.createdelight.sequencedpatternprovider.probability.ProbabilityPlan;
 import io.github.createdelight.sequencedpatternprovider.tracking.AttemptToken;
+import io.github.createdelight.sequencedpatternprovider.tracking.DeferredProviderUpdate;
 import io.github.createdelight.sequencedpatternprovider.tracking.TokenlessReturnSelector;
 import it.unimi.dsi.fastutil.objects.Object2LongMap;
 import net.minecraft.core.BlockPos;
@@ -62,6 +63,7 @@ public final class MasterProviderBlockEntity extends AENetworkBlockEntity implem
     private final Set<Item> trackedWorkpieceItems = new LinkedHashSet<>();
     private final Set<AEItemKey> loggedAmbiguousTokenlessReturns = new HashSet<>();
     private final Map<ProbabilityKey, Long> probabilityRemainders = new HashMap<>();
+    private final DeferredProviderUpdate providerUpdate = new DeferredProviderUpdate();
     private boolean inventoryTrackingDirty = true;
     private final ItemStackHandler patterns = new ItemStackHandler(9) {
         @Override
@@ -73,7 +75,7 @@ public final class MasterProviderBlockEntity extends AENetworkBlockEntity implem
         protected void onContentsChanged(int slot) {
             patternDetailsCache.clear();
             blockingInputsByChild.clear();
-            ICraftingProvider.requestUpdate(getMainNode());
+            providerUpdate.request();
             saveChanges();
         }
     };
@@ -95,7 +97,7 @@ public final class MasterProviderBlockEntity extends AENetworkBlockEntity implem
     @Override
     public void onReady() {
         super.onReady();
-        ICraftingProvider.requestUpdate(getMainNode());
+        providerUpdate.request();
     }
 
     public boolean addChild(BlockPos pos) {
@@ -104,7 +106,7 @@ public final class MasterProviderBlockEntity extends AENetworkBlockEntity implem
         children.add(pos.immutable());
         nextChildIndexByRoute.clear();
         blockingInputsByChild.clear();
-        ICraftingProvider.requestUpdate(getMainNode());
+        providerUpdate.request();
         saveChanges();
         return true;
     }
@@ -112,13 +114,17 @@ public final class MasterProviderBlockEntity extends AENetworkBlockEntity implem
     public void serverTick() {
         if (level == null || !getMainNode().isActive()) return;
 
+        // AE2 dispatch has returned before block ticks run. Never mutate its
+        // provider list synchronously from pushPattern (or a nested callback).
+        providerUpdate.flush(() -> ICraftingProvider.requestUpdate(getMainNode()));
+
         // Child routes can change independently after linking. Refresh the patterns
         // periodically so AE stops advertising recipes whose required route vanished.
         if (++patternRefreshTicks >= 20) {
             patternRefreshTicks = 0;
             patternDetailsCache.clear();
             blockingInputsByChild.clear();
-            ICraftingProvider.requestUpdate(getMainNode());
+            providerUpdate.request();
         }
 
         if (jobs.isEmpty()) {
@@ -165,7 +171,7 @@ public final class MasterProviderBlockEntity extends AENetworkBlockEntity implem
                 providerAvailabilityChanged = true;
             } else index++;
         }
-        if (providerAvailabilityChanged) ICraftingProvider.requestUpdate(getMainNode());
+        if (providerAvailabilityChanged) providerUpdate.request();
         refreshInventoryTracking();
         if (changed) saveChanges();
     }
@@ -317,7 +323,7 @@ public final class MasterProviderBlockEntity extends AENetworkBlockEntity implem
         children.clear();
         nextChildIndexByRoute.clear();
         blockingInputsByChild.clear();
-        ICraftingProvider.requestUpdate(getMainNode());
+        providerUpdate.request();
         saveChanges();
     }
 
@@ -685,7 +691,7 @@ public final class MasterProviderBlockEntity extends AENetworkBlockEntity implem
         }
         jobs.clear();
         clearInventoryTracking();
-        ICraftingProvider.requestUpdate(getMainNode());
+        providerUpdate.request();
         saveChanges();
         player.displayClientMessage(Component.translatable("message.sequenced_pattern_provider.master.aborted"), true);
     }
@@ -772,7 +778,7 @@ public final class MasterProviderBlockEntity extends AENetworkBlockEntity implem
         LOGGER.debug("SPP accepted probability batch at {}: recipe={}, batch={}, attempts={}, activeJobs={}",
                 worldPosition, details.recipeId(), batchId, batchSize, jobs.size());
         inventoryTrackingDirty = true;
-        ICraftingProvider.requestUpdate(getMainNode());
+        providerUpdate.request();
         saveChanges();
         return true;
     }
